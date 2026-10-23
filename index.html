@@ -1,0 +1,2372 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AdVerse Agency</title>
+  <meta name="description" content="AdVerse Agency management dashboard for advertising campaigns, ad accounts, payments, and agency calculations with Google Sheets backend.">
+  <meta property="og:title" content="AdVerse Agency">
+  <meta property="og:description" content="AdVerse Agency management dashboard for advertising campaigns, ad accounts, payments, and agency calculations with Google Sheets backend.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#2D323E">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AdVerse">
+  <script>
+    // Early Global Constants Protection
+    window.CH = ['SL','OFF $','AD Account','ID Name','Status','Page Name','Start','End','Types','Day','Budget','Daily $','Taka','Rate','Entry Date','Month','Year','Record ID'];
+    window.TODAY_HEADERS = ['SL','OFF $','AD Account','ID Name','Status','Page Name','Start','End','Types','Day','Budget','Daily $','Taka','Rate','Entry Date','Record ID','Month','Year'];
+    window.PAYMENT_HEADERS = ['Date','Payment Method','Paid (৳)','Month','Year','Note'];
+    window.PAGE_SUMMARY_HEADERS = ['Page Name','Total Ads','Total Budget $'];
+    window.AGENCY_SPENDING_HEADERS = ['Month','Year','Total Spend $'];
+    window.MONTHLY_CLOSING_HEADERS = ['Month','Year','Status','Closed At','Closed By','Total Campaign','Total Budget $','Total Campaign Taka','Total Paid (৳)','Total Due (৳)','Agency Cost (৳)','Rate'];
+    window.AGENCY_COST_HEADERS = ['Date','Month','Year','Type','Cost','Per Person Cost','Status','Record ID'];
+    window.END_ADS_HEADERS = ['Page Name','Start Date','End Date','Day','Budget','Type'];
+    window.AD_ACCOUNT_BILLING_HEADERS = ['Ad Account','ID Name','Due ($)','Threshold ($)','Remaining ($)','Billing Date','Active Spend ($)','Active Ads','Card / Method','Status','Last Checked'];
+    window.MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    // Purge all stale caches immediately to ensure fresh deployments are loaded
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      caches.keys().then(function(keys) {
+        keys.forEach(function(k) {
+          caches.delete(k);
+        });
+      }).catch(function() {});
+    }
+
+    // Universal Error Shield - catches and neutralizes transient host/proxy parse errors
+    window.addEventListener('error', function(event) {
+      if (!event) return;
+      var msg = (event.message || (event.error && event.error.message) || event.error || '').toString();
+      if (msg.includes('Could not parse server response') || msg.includes('ScriptError') || msg.includes('ResizeObserver')) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        console.warn('[AdVerse Shield]: Handled host parse notification:', msg);
+        return true;
+      }
+    }, true);
+
+    window.addEventListener('unhandledrejection', function(event) {
+      if (!event) return;
+      var reason = (event.reason ? (event.reason.message || event.reason) : '').toString();
+      if (reason.includes('Could not parse server response') || reason.includes('ScriptError')) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        console.warn('[AdVerse Shield]: Handled host promise notification:', reason);
+        return true;
+      }
+    }, true);
+
+    // Early Permanent Polyfill for google.script.run
+    (function() {
+      window.google = window.google || {};
+      window.google.script = window.google.script || {};
+      
+      function createRunProxy() {
+        return new Proxy({}, {
+          get: function(target, prop) {
+            if (typeof prop === 'symbol' || prop === 'then' || prop === 'toJSON' || prop === 'valueOf') return undefined;
+            if (prop === 'withSuccessHandler') {
+              return function(success) {
+                return new Proxy({ __success: success }, {
+                  get: function(st, method) {
+                    if (typeof method === 'symbol' || method === 'then' || method === 'toJSON') return undefined;
+                    if (method === 'withFailureHandler') {
+                      return function(failure) {
+                        return new Proxy({ __success: st.__success, __failure: failure }, {
+                          get: function(s, realMethod) {
+                            if (typeof realMethod === 'symbol' || realMethod === 'then' || realMethod === 'toJSON') return undefined;
+                            return function() {
+                              var args = Array.prototype.slice.call(arguments);
+                              if (window.__cloudRpc) {
+                                return window.__cloudRpc(String(realMethod), args, s.__success, s.__failure);
+                              }
+                              if (typeof s.__success === 'function') {
+                                setTimeout(function() {
+                                  if (window.__cloudRpc) window.__cloudRpc(String(realMethod), args, s.__success, s.__failure);
+                                  else s.__success({ success: true, offline: true });
+                                }, 30);
+                              }
+                              return null;
+                            };
+                          }
+                        });
+                      };
+                    }
+                    return function() {
+                      var args = Array.prototype.slice.call(arguments);
+                      if (window.__cloudRpc) {
+                        return window.__cloudRpc(String(method), args, st.__success, st.__failure);
+                      }
+                      if (typeof st.__success === 'function') {
+                        setTimeout(function() {
+                          if (window.__cloudRpc) window.__cloudRpc(String(method), args, st.__success, st.__failure);
+                          else st.__success({ success: true, offline: true });
+                        }, 30);
+                      }
+                      return null;
+                    };
+                  }
+                });
+              };
+            }
+            if (prop === 'withFailureHandler') {
+              return function(failure) {
+                return new Proxy({ __failure: failure }, {
+                  get: function(st, method) {
+                    if (typeof method === 'symbol' || method === 'then' || method === 'toJSON') return undefined;
+                    if (method === 'withSuccessHandler') {
+                      return function(success) {
+                        return new Proxy({ __failure: st.__failure, __success: success }, {
+                          get: function(s, realMethod) {
+                            if (typeof realMethod === 'symbol' || realMethod === 'then' || realMethod === 'toJSON') return undefined;
+                            return function() {
+                              var args = Array.prototype.slice.call(arguments);
+                              if (window.__cloudRpc) {
+                                return window.__cloudRpc(String(realMethod), args, s.__success, s.__failure);
+                              }
+                              if (typeof s.__success === 'function') {
+                                setTimeout(function() {
+                                  if (window.__cloudRpc) window.__cloudRpc(String(realMethod), args, s.__success, s.__failure);
+                                  else s.__success({ success: true, offline: true });
+                                }, 30);
+                              }
+                              return null;
+                            };
+                          }
+                        });
+                      };
+                    }
+                    return function() {
+                      var args = Array.prototype.slice.call(arguments);
+                      if (window.__cloudRpc) {
+                        return window.__cloudRpc(String(method), args, null, st.__failure);
+                      }
+                      return null;
+                    };
+                  }
+                });
+              };
+            }
+            return function() {
+              var args = Array.prototype.slice.call(arguments);
+              if (window.__cloudRpc) {
+                return window.__cloudRpc(String(prop), args);
+              }
+              return null;
+            };
+          }
+        });
+      }
+
+      try {
+        var runProxy = createRunProxy();
+        Object.defineProperty(window.google.script, 'run', {
+          get: function() { return runProxy; },
+          set: function() {},
+          configurable: true,
+          enumerable: true
+        });
+      } catch (_) {
+        window.google.script.run = createRunProxy();
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    .gsi-material-button {
+      -moz-user-select: none;
+      -webkit-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      appearance: none;
+      background-color: #FFFFFF;
+      border: 1px solid #747775;
+      border-radius: 20px;
+      box-sizing: border-box;
+      color: #1F1F1F;
+      cursor: pointer;
+      font-family: 'Roboto', 'Inter', arial, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      height: 34px;
+      letter-spacing: 0.2px;
+      outline: none;
+      overflow: hidden;
+      padding: 0 12px;
+      position: relative;
+      text-align: center;
+      transition: background-color .2s, border-color .2s, box-shadow .2s;
+      vertical-align: middle;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .gsi-material-button:hover {
+      background-color: #F8FAFC;
+      border-color: #CBD5E1;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .gsi-material-button-icon {
+      height: 18px;
+      min-width: 18px;
+      width: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+  <link rel="stylesheet" href="/src/styles/app.css">
+</head>
+<body>
+  <div class="app" id="appContainer">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand" onclick="selectMenu('today_created_campaign')">
+        <div class="brand-icon" style="padding:0;overflow:hidden;background:#2D323E;display:flex;align-items:center;justify-content:center;">
+          <img src="/favicon.svg" alt="AdVerse Agency" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" />
+        </div>
+        <div>
+          <div class="brand-title">AdVerse Agency</div>
+          <div class="brand-sub">Intelligence & Campaign Suite</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Admin-Only Tools Group (Hidden for Viewers) -->
+        <div class="admin-top-tools" id="adminTopTools" style="display:flex;align-items:center;gap:8px">
+          <!-- Tools & Settings Menu (Admin Only) -->
+          <div class="settings-menu-wrap" id="adminToolsWrap">
+            <button class="btn btn-secondary" id="btnSettingsToggle" onclick="toggleSettingsDropdown(event)" type="button" title="Settings, Accounts & Pages" style="font-weight:700">
+              <span class="ms" style="font-size:17px;color:var(--pri)">settings</span>
+              <span class="hidden-sm">Tools & Settings</span>
+              <span class="ms" style="font-size:14px;opacity:0.6">expand_more</span>
+            </button>
+            <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+              <button class="settings-menu-item" id="btnAuditParity" type="button" onclick="closeAllDropdowns(); openLiveDiagnosticsModal();">
+                <span class="ms" style="color:var(--sec)">fact_check</span>
+                <span>Live Data Audit</span>
+                <span class="settings-menu-badge">Audit</span>
+              </button>
+
+              <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openAdAccountsPagesModal();">
+                <span class="ms" style="color:var(--wrn)">manage_accounts</span>
+                <span>Accounts & Pages</span>
+                <span class="settings-menu-badge">Manage</span>
+              </button>
+
+              <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openRoleLinksModal();">
+                <span class="ms" style="color:#10B981">link</span>
+                <span>Shareable Access Links</span>
+              </button>
+
+              <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openChangePinModal();">
+                <span class="ms" style="color:#EC4899">key</span>
+                <span>Change Admin PIN</span>
+                <span class="settings-menu-badge" style="background:rgba(236,72,153,0.15);color:#EC4899">Security</span>
+              </button>
+
+              <div class="settings-item-divider"></div>
+
+              <a class="settings-menu-item" href="/api/download-zip" download="adverse-agency-project.zip" onclick="closeAllDropdowns();">
+                <span class="ms" style="color:#10B981">folder_zip</span>
+                <span>Download Project .ZIP</span>
+                <span class="settings-menu-badge">Full</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Instant Sheet Sync Indicator -->
+        <!-- Instant Sync & Refresh (Accessible for Admin and Viewers) -->
+        <button class="btn-refresh-premium" id="btnRefreshTop" onclick="refreshCurrentView()" type="button" title="Instant Refresh & Sync (Shortcut: R)">
+          <span class="refresh-icon-sphere">
+            <span class="ms refresh-icon">sync</span>
+          </span>
+          <span class="refresh-label">Refresh</span>
+          <span class="refresh-kbd">R</span>
+        </button>
+
+        <!-- User Role Badge -->
+        <div class="user-badge" id="userBadge" style="background:var(--pri-light);color:var(--pri);padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:800;border:1px solid rgba(99,102,241,.3)">Admin</div>
+
+        <!-- Logout -->
+        <button class="btn-theme" onclick="appLogout()" type="button" title="Logout">
+          <span class="ms" style="font-size:16px">logout</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="top-nav" id="topNav">
+      <div class="nav-segmented-track" id="navSegmentedTrack">
+        <button class="nav-btn nav-btn-today_created_campaign active" data-menu-key="today_created_campaign" type="button" onclick="selectMenu('today_created_campaign')">
+          <span class="nav-icon-badge nav-icon-today_created_campaign"><span class="ms">today</span></span>
+          <span class="nav-title">Today Created</span>
+          <span class="nav-live-pulse-dot" title="Live Today Monitoring"></span>
+        </button>
+        <button class="nav-btn nav-btn-end_ads" data-menu-key="end_ads" type="button" onclick="selectMenu('end_ads')">
+          <span class="nav-icon-badge nav-icon-end_ads"><span class="ms">event_busy</span></span>
+          <span class="nav-title">End Ads</span>
+          <span class="nav-badge-pill end-ads-badge" id="endAdsNavBadge" style="display:none">0</span>
+        </button>
+        <button class="nav-btn nav-btn-campaign" data-menu-key="campaign" type="button" onclick="selectMenu('campaign')">
+          <span class="nav-icon-badge nav-icon-campaign"><span class="ms">campaign</span></span>
+          <span class="nav-title">All Campaign</span>
+        </button>
+        <button class="nav-btn nav-btn-page_summery" data-menu-key="page_summery" type="button" onclick="selectMenu('page_summery')">
+          <span class="nav-icon-badge nav-icon-page_summery"><span class="ms">analytics</span></span>
+          <span class="nav-title">Page Summary</span>
+        </button>
+        <button class="nav-btn nav-btn-payment_due_tracker" data-menu-key="payment_due_tracker" type="button" onclick="selectMenu('payment_due_tracker')">
+          <span class="nav-icon-badge nav-icon-payment_due_tracker"><span class="ms">account_balance_wallet</span></span>
+          <span class="nav-title">Payment</span>
+        </button>
+        <button class="nav-btn nav-btn-agency_spending" data-menu-key="agency_spending" type="button" onclick="selectMenu('agency_spending')">
+          <span class="nav-icon-badge nav-icon-agency_spending"><span class="ms">payments</span></span>
+          <span class="nav-title">Agency Calculation</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <div class="page-content" id="pageContent">
+        <!-- Top Header & Action Row -->
+        <div class="topbar-centered" id="topbarCentered">
+          <div class="topbar-titles">
+            <h1 id="pageTitle">Today Created</h1>
+          </div>
+        </div>
+
+        <!-- Monthly Calculation Filter -->
+        <div class="filters-bar hidden" id="agencyCalcFilterWrap">
+          <div class="filter-field">
+            <label>Select Month</label>
+            <select id="agencyCalcMonth" onchange="loadMenuData(true)"></select>
+          </div>
+          <div class="filter-field">
+            <label>Select Year</label>
+            <select id="agencyCalcYear" onchange="loadMenuData(true)"></select>
+          </div>
+        </div>
+
+
+        <!-- Stat Cards (KPI Summary) -->
+        <div class="stats-compact" id="statsRow">
+          <div class="stat-card stat-purple">
+            <div class="stat-header">
+              <span class="stat-label">Today Entries</span>
+              <div class="stat-icon"><span class="ms">calendar_today</span></div>
+            </div>
+            <div class="stat-value" id="stat_tc_entries">0</div>
+          </div>
+          <div class="stat-card stat-blue">
+            <div class="stat-header">
+              <span class="stat-label">Today Budget ($)</span>
+              <div class="stat-icon"><span class="ms">paid</span></div>
+            </div>
+            <div class="stat-value" id="stat_tc_budget">$0</div>
+          </div>
+          <div class="stat-card stat-green">
+            <div class="stat-header">
+              <span class="stat-label">Today Taka</span>
+              <div class="stat-icon"><span class="ms">currency_exchange</span></div>
+            </div>
+            <div class="stat-value" id="stat_tc_taka">৳0</div>
+          </div>
+        </div>
+
+        <!-- Fast Entry Card (Open by default across menus) -->
+        <div class="entry-card" id="entryCard">
+          <div class="entry-header">
+            <div class="entry-header-left">
+              <div class="entry-header-icon-wrap" style="background:linear-gradient(135deg, #F59E0B, #EF4444);color:#fff">
+                <span class="ms">bolt</span>
+              </div>
+              <div>
+                <h3 id="entryTitle" style="display:flex;align-items:center;gap:8px">
+                  <span>⚡ Quick New Campaign</span>
+                </h3>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <button class="entry-btn-reset" id="btnResetEntry" type="button" onclick="renderEntryForm()">
+                <span class="ms" style="font-size:15px">restart_alt</span> Reset
+              </button>
+              <button class="entry-btn-save" id="btnSaveEntry" type="button" onclick="if(typeof window.saveEntry === 'function') window.saveEntry(); else console.error('saveEntry not loaded');" title="Save Campaign instantly (Ctrl+Enter)">
+                <span class="ms" style="font-size:16px">bolt</span> Save Campaign (Ctrl+↵)
+              </button>
+            </div>
+          </div>
+          <div class="entry-body">
+            <form id="entryForm" class="entry-grid"></form>
+          </div>
+        </div>
+
+        <!-- Filters Bar for Campaign & Lists (Instant Auto-Filter on Change) -->
+        <div class="filters-bar hidden" id="filtersBar" style="flex-direction:column;align-items:stretch;gap:10px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div class="filter-field">
+              <label>Month</label>
+              <select id="filterMonth"></select>
+            </div>
+            <div class="filter-field">
+              <label>Year</label>
+              <select id="filterYear"></select>
+            </div>
+            <div class="filter-field hidden" id="pageTypeFilterField">
+              <label>Page Type</label>
+              <select id="pageTypeFilter">
+                <option value="">All Pages</option>
+                <option value="new">New Pages</option>
+                <option value="old">Old Pages</option>
+              </select>
+            </div>
+            <div class="filter-field hidden" id="campaignDateFilterField">
+              <label>Start Date</label>
+              <input type="date" id="filterDate">
+            </div>
+          </div>
+          <div id="monthQuickPills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:4px;border-top:1px dashed var(--bor)"></div>
+        </div>
+
+        <!-- Daily Stats Wrap -->
+        <div class="daily-stats-wrap hidden" id="dailyStatsWrap" style="background:var(--card);border:1px solid var(--bor);border-radius:var(--radius-md);padding:14px 18px;display:flex;justify-content:space-between;align-items:center">
+          <div class="daily-stats-title" style="font-weight:800;font-size:13px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+            <span class="ms" style="color:var(--pri)">calendar_today</span> <span id="dailyStatsTitle">Daily Performance</span>
+          </div>
+          <div class="daily-stats-row" id="dailyStatsRow" style="display:flex;gap:16px"></div>
+        </div>
+
+        <!-- Payment Entry Card -->
+        <div class="entry-card hidden" id="paymentEntryCard">
+          <div class="entry-header">
+            <div>
+              <h3><span class="ms" style="color:#10B981">payments</span> Add Daily Client Payment</h3>
+              <p>Record Bkash, Nagad, or Bank deposit directly</p>
+            </div>
+            <button class="btn btn-primary" id="btnAddPayment" type="button"><span class="ms">add</span> Record Payment</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:flex-start">
+            <div class="form-field"><label>Date</label><input type="date" id="payDate"></div>
+            <div class="form-field">
+              <label>Payment Method</label>
+              <select id="payMethod" onchange="handlePaymentMethodChange(this.value)">
+                <option value="Bkash">Bkash</option>
+                <option value="Nagad">Nagad</option>
+                <option value="Bank">Bank</option>
+                <option value="BK to Bank">BK to Bank</option>
+                <option value="Merchant">Merchant</option>
+                <option value="Cash">Cash</option>
+                <option value="Advance Paid (Old Month)">Advance Paid (Old Month)</option>
+              </select>
+            </div>
+            <div class="form-field hidden" id="payAdvanceNoteWrap">
+              <label style="color:var(--pri);font-weight:700">Advance Note / Context (কোন ক্ষেত্রে অগ্রিম)</label>
+              <input type="text" id="payAdvanceNote" placeholder="e.g. Previous month excess, Client advance, Specific campaign...">
+            </div>
+            <div class="form-field">
+              <label>Paid (৳)</label>
+              <input type="number" id="payAmount" step="any" placeholder="e.g. 50000">
+              <div class="quick-preset-chips" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+                <button type="button" class="preset-chip" onclick="setQuickPayment(50000)">50,000</button>
+                <button type="button" class="preset-chip" onclick="setQuickPayment(50625)">50,625</button>
+                <button type="button" class="preset-chip" onclick="setQuickPayment(100000)">100,000</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- End Ads Container -->
+        <div class="end-ads-container hidden" id="endAdsContainer" style="display:flex;flex-direction:column;gap:16px;margin-bottom:16px">
+          <!-- Top Ending Ads Summary (Today & Tomorrow Only) -->
+          <div class="end-ads-top-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+            <div class="stat-card stat-red" style="padding:16px 20px;border-left:4px solid #EF4444;background:var(--card);box-shadow:0 2px 8px rgba(239,68,68,0.1)">
+              <div class="stat-header" style="display:flex;justify-content:space-between;align-items:center">
+                <span class="stat-label" style="font-weight:700;color:var(--dan);font-size:13.5px">🔴 Ending Today</span>
+                <div class="stat-icon" style="background:rgba(239,68,68,0.12);color:var(--dan)"><span class="ms">event_busy</span></div>
+              </div>
+              <div class="stat-value" id="topTodayEndCount" style="font-size:26px;font-weight:800;color:var(--dan);margin:6px 0 2px 0">0 Campaigns</div>
+              <div class="stat-sub" id="topTodayEndBudget" style="font-size:12.5px;color:var(--txt-muted)">Total ad spend ending today</div>
+            </div>
+            <div class="stat-card stat-green" style="padding:16px 20px;border-left:4px solid #10B981;background:var(--card);box-shadow:0 2px 8px rgba(16,185,129,0.1)">
+              <div class="stat-header" style="display:flex;justify-content:space-between;align-items:center">
+                <span class="stat-label" style="font-weight:700;color:var(--suc);font-size:13.5px">🟢 Ending Tomorrow</span>
+                <div class="stat-icon" style="background:rgba(16,185,129,0.12);color:var(--suc)"><span class="ms">schedule</span></div>
+              </div>
+              <div class="stat-value" id="topTomorrowEndCount" style="font-size:26px;font-weight:800;color:var(--suc);margin:6px 0 2px 0">0 Campaigns</div>
+              <div class="stat-sub" id="topTomorrowEndBudget" style="font-size:12.5px;color:var(--txt-muted)">Total ad spend ending tomorrow</div>
+            </div>
+          </div>
+
+          <!-- Top Row: Today & Tomorrow Tables -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+            <div class="records-card">
+              <div class="table-toolbar" style="display:flex;justify-content:space-between;align-items:center">
+                <div style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px">
+                  <span class="ms" style="color:var(--dan)">event_busy</span> Ending Today (<span id="todayTableCount">0</span>)
+                </div>
+                <span style="font-size:11.5px;color:var(--txt-muted)">Click row to copy notice</span>
+              </div>
+              <div class="table-wrap">
+                <table id="todayEndTable">
+                  <thead><tr><th style="width:55px">SL</th><th>Page Name</th><th>Start</th><th>End</th><th>Day</th><th>Budget</th><th style="text-align:center">Notice</th></tr></thead>
+                  <tbody id="todayEndBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="records-card">
+              <div class="table-toolbar" style="display:flex;justify-content:space-between;align-items:center">
+                <div style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px">
+                  <span class="ms" style="color:var(--suc)">schedule</span> Ending Tomorrow (<span id="tomorrowTableCount">0</span>)
+                </div>
+                <span style="font-size:11.5px;color:var(--txt-muted)">Click row to copy notice</span>
+              </div>
+              <div class="table-wrap">
+                <table id="tomorrowEndTable">
+                  <thead><tr><th style="width:55px">SL</th><th>Page Name</th><th>Start</th><th>End</th><th>Day</th><th>Budget</th><th style="text-align:center">Notice</th></tr></thead>
+                  <tbody id="tomorrowEndBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- Payment History Card -->
+        <div class="records-card hidden" id="paymentHistoryCard">
+          <div class="table-toolbar">
+            <div style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="color:var(--suc)">history</span> Payment Deposit History
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="paymentTable"><thead id="paymentTableHead"></thead><tbody id="paymentTableBody"></tbody><tfoot id="paymentTableFoot"></tfoot></table>
+          </div>
+        </div>
+
+        <!-- Agency Calculation & Monthly Settlement Executive View Container -->
+        <div class="agency-calc-container hidden" id="agencyCalcContainer"></div>
+
+        <!-- Ad Account Billing & Threshold Tracker Container (Admin Only) -->
+        <div class="ad-billing-container hidden" id="adBillingContainer"></div>
+
+        <!-- Today Created: Ad Setup Quality Checker & Audit Bar (Admin Only / Today Created) -->
+        <div class="today-setup-audit-card hidden" id="todaySetupAuditCard"></div>
+
+        <!-- Main Records Card with Sticky Search & Toolbar -->
+        <div class="records-card" id="recordsCard">
+          <div class="table-toolbar">
+            <div class="toolbar-search" style="position:relative">
+              <span class="ms">search</span>
+              <input type="text" id="tableFilterInput" oninput="filterTableRows(this.value)" placeholder="Search campaigns by page, account, ID, or status...">
+              <button type="button" id="btnClearTableSearch" onclick="clearTableSearch()" class="hidden" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt-muted);font-size:13px;font-weight:700;cursor:pointer;padding:4px 6px;border-radius:4px" title="Clear search">✕</button>
+          </div>
+          <div class="table-wrap">
+            <table id="dataTable"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+            <div class="empty-state hidden" id="emptyState" style="padding:48px 20px;text-align:center;color:var(--txt-muted)">
+              <span class="ms" style="font-size:44px;opacity:0.4;display:block;margin-bottom:10px;color:var(--pri)">folder_open</span>
+              <div style="font-weight:700;font-size:15px;color:var(--txt)">No campaigns found</div>
+              <p id="emptyStateDesc" style="font-size:13px;margin:6px auto 16px;max-width:400px;color:var(--txt-muted)">No campaign records found for this view.</p>
+              <div id="emptyStateAdminActions" class="hidden" style="display:inline-flex;gap:10px;justify-content:center;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="toggleEntryCard(true)" type="button" style="padding:7px 16px;font-size:12.5px">
+                  <span class="ms" style="font-size:16px">add</span> New Campaign
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette Modal (Ctrl + K) -->
+  <div class="modal-overlay hidden" id="cmdPaletteOverlay" onclick="if(event.target===this)closeCmdPalette()">
+    <div class="cmd-box">
+      <div class="cmd-input-wrap">
+        <span class="ms" style="color:var(--pri);font-size:22px">search</span>
+        <input type="text" id="cmdPaletteInput" placeholder="Type a command or jump to menu... (e.g. Campaign, Add, Sync, Dark)" oninput="handleCmdSearch(this.value)">
+        <span class="cmd-kbd">ESC</span>
+      </div>
+      <div class="cmd-list" id="cmdList"></div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Hub Modal (Press ? or Shift+/) -->
+  <div class="modal-overlay hidden" id="hotkeysOverlay" onclick="if(event.target===this)closeHotkeysModal()">
+    <div class="modal modal-lg" style="max-width:620px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#4F46E5,#818CF8);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">keyboard</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Keyboard Shortcuts Hub</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Fast power-user hotkeys for mouse-free productivity</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeHotkeysModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px 20px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:8px;padding:10px 14px">
+            <div style="font-size:11px;font-weight:800;color:var(--pri);text-transform:uppercase;margin-bottom:8px">⚡ Action & Save</div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>⚡ Quick Campaign</span><span class="cmd-kbd" style="background:#F59E0B;color:#fff;border-color:#F59E0B">N</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>Instant Save</span><span class="cmd-kbd">Ctrl+↵ / Ctrl+S</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>Focus Table Search</span><span class="cmd-kbd">Ctrl+F</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px">
+              <span>Command Palette</span><span class="cmd-kbd">Ctrl+K</span>
+            </div>
+          </div>
+          <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:8px;padding:10px 14px">
+            <div style="font-size:11px;font-weight:800;color:var(--pri);text-transform:uppercase;margin-bottom:8px">🚀 Navigation & Tools</div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>Live Refresh & Sync</span><span class="cmd-kbd">R / Alt+R</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>Export CSV</span><span class="cmd-kbd">Ctrl+Shift+E</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--bor);font-size:12px">
+              <span>Table Density</span><span class="cmd-kbd">Alt+D</span>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px">
+              <span>Shortcuts Guide</span><span class="cmd-kbd">?</span>
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:800;color:var(--pri);text-transform:uppercase;margin-bottom:8px">🎯 Row Focus Mode — Quick Controls</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:12px">
+            <div style="display:flex;justify-content:space-between"><span>Select / Focus Row</span><span class="cmd-kbd">Click Table Row</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Next / Prev Row</span><span class="cmd-kbd">↑ / ↓ (or K / J)</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Copy Format</span><span class="cmd-kbd">C</span></div>
+            <div style="display:flex;justify-content:space-between"><span>WhatsApp Notice</span><span class="cmd-kbd">W</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Increase Budget (+Budget)</span><span class="cmd-kbd">+</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Edit Campaign</span><span class="cmd-kbd">E</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Duplicate / Clone</span><span class="cmd-kbd">D</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Inspect Details</span><span class="cmd-kbd">I</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Close Focus</span><span class="cmd-kbd">Esc</span></div>
+          </div>
+        </div>
+        <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:8px;padding:10px 14px">
+          <div style="font-size:11px;font-weight:800;color:var(--pri);text-transform:uppercase;margin-bottom:8px">📑 Quick Menu Jump</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="cmd-kbd" style="cursor:pointer" onclick="selectMenu('campaign');closeHotkeysModal()">Alt+1: Campaign</span>
+            <span class="cmd-kbd" style="cursor:pointer" onclick="selectMenu('payment');closeHotkeysModal()">Alt+2: Payment</span>
+            <span class="cmd-kbd" style="cursor:pointer" onclick="selectMenu('client_spend');closeHotkeysModal()">Alt+3: Client Spend</span>
+            <span class="cmd-kbd" style="cursor:pointer" onclick="selectMenu('agency_cost');closeHotkeysModal()">Alt+4: Agency Cost</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
+        <span style="font-size:11.5px;color:var(--txt-muted)"><span class="ms" style="font-size:15px;color:#F59E0B;vertical-align:middle">lightbulb</span> Press <b>?</b> anywhere on keyboard to open this guide.</span>
+        <button class="btn btn-primary btn-sm" type="button" onclick="closeHotkeysModal()">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Visual Analytics & ROI Intelligence Modal -->
+  <div class="modal-overlay hidden" id="analyticsOverlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gp);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">analytics</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Agency Intelligence & Analytics</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Live Performance, Revenue, Dues & Client Breakdown</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAnalyticsModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" id="analyticsModalBody">
+        <div class="skeleton skeleton-card" style="margin-bottom:12px"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeAnalyticsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp Client Notice Generator Modal -->
+  <div class="modal-overlay hidden" id="whatsappOverlay" onclick="if(event.target===this)closeWhatsAppModal()">
+    <div class="modal" style="max-width:540px;width:95%">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:#25D366;display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">chat</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Client Notice Generator</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Professional client notifications with duration & budget</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeWhatsAppModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field" style="margin-bottom:12px">
+          <label>Select Campaign Record</label>
+          <select id="waCampaignSelect" onchange="generateWhatsAppNotice()"></select>
+        </div>
+        <div class="form-field" style="margin-bottom:12px">
+          <label>Notice Format / Style</label>
+          <select id="waLanguageSelect" onchange="generateWhatsAppNotice()">
+            <option value="focused">🎯 Focused: Duration & Budget Summary</option>
+            <option value="bn_pro">🌟 Agency Full Format (Detailed)</option>
+            <option value="en_pro">💼 English Clean Agency Format</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label style="display:flex;justify-content:space-between;align-items:center">
+            <span>Client Message Preview</span>
+            <span style="font-size:11px;color:var(--txt-dim)">1-Click Ready</span>
+          </label>
+          <textarea id="waMessageText" rows="8" style="width:100%;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;line-height:1.6;padding:12px;border-radius:8px;background:var(--input-bg);color:var(--txt);border:1px solid var(--bor)"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
+        <button class="btn btn-secondary" type="button" onclick="closeWhatsAppModal()">Close</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" style="border-color:#25D366;color:#25D366;font-weight:700" onclick="sendWhatsAppWebDirect()" type="button" title="Send directly via WhatsApp Web">
+            <span class="ms" style="font-size:16px">open_in_new</span> WhatsApp Web
+          </button>
+          <button class="btn btn-primary" onclick="copyWhatsAppNotice()" type="button">
+            <span class="ms" style="font-size:16px">content_copy</span> Copy Notice
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Today's Ad Setup Quality Checker & Audit Assistant Modal -->
+  <div class="modal-overlay hidden" id="adSetupAuditModalOverlay" onclick="if(event.target===this)closeAdSetupAuditModal()">
+    <div class="modal ad-setup-audit-modal" style="max-width:620px;width:95%">
+      <div class="modal-header" style="border-bottom:1px solid var(--bor);padding:14px 18px;background:var(--bg)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg, #6366F1, #10B981);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(99,102,241,0.25)">
+            <span class="ms" style="font-size:22px">verified_user</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px">
+              <span>Today's Ad Setup Audit</span>
+              <span id="auditProgressBadge" class="audit-progress-badge" style="background:var(--pri-light);color:var(--pri);font-size:11px;font-weight:800;padding:2px 8px;border-radius:12px">1 / 5</span>
+            </h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)" id="auditSubTitle">Check & verify setup in Facebook Ads Manager</p>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="btn btn-icon btn-secondary" type="button" onclick="closeAdSetupAuditModal()"><span class="ms">close</span></button>
+        </div>
+      </div>
+      <!-- Audit Progress Bar -->
+      <div class="audit-top-progress" style="height:4px;background:var(--bor);width:100%;overflow:hidden">
+        <div id="auditModalProgressBar" style="height:100%;background:linear-gradient(90deg, #6366F1, #10B981);width:20%;transition:width 0.3s ease"></div>
+      </div>
+      <div class="modal-body" id="adSetupAuditModalBody" style="padding:16px 20px;max-height:calc(85vh - 140px);overflow-y:auto">
+        <!-- Injected via JavaScript -->
+      </div>
+      <div class="modal-footer" id="adSetupAuditModalFooter" style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-top:1px solid var(--bor);gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary" type="button" onclick="navigateAuditStep(-1)" id="btnAuditPrev">
+            <span class="ms">arrow_back</span> Prev
+          </button>
+          <button class="btn btn-secondary" type="button" onclick="navigateAuditStep(1)" id="btnAuditNext">
+            Next <span class="ms">arrow_forward</span>
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-secondary" type="button" id="btnAuditEdit" onclick="editCurrentAuditRecord()" style="color:var(--pri);border-color:rgba(99,102,241,0.35);background:rgba(99,102,241,0.1);font-weight:700">
+            <span class="ms">edit</span> Fix / Edit
+          </button>
+          <button class="btn btn-primary" type="button" id="btnAuditVerifyToggle" onclick="toggleCurrentAuditVerification()" style="font-weight:700;display:inline-flex;align-items:center;gap:6px;min-width:160px;justify-content:center">
+            <span class="ms">check_circle</span> Mark Verified & Next
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campaign Quick Inspector Modal (For both Admin & Viewer) -->
+  <div class="modal-overlay hidden" id="campaignInspectorOverlay" onclick="if(event.target===this)closeCampaignInspector()">
+    <div class="modal" style="max-width:540px;width:95%">
+      <div class="modal-header" style="border-bottom:1px solid var(--bor);padding:14px 18px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--pri-light);color:var(--pri);display:flex;align-items:center;justify-content:center">
+            <span class="ms" style="font-size:20px">visibility</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800" id="inspPageName">Campaign Details</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)" id="inspSubTitle">Quick Campaign Inspector</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeCampaignInspector()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px;display:flex;flex-direction:column;gap:12px">
+        <!-- Progress Bar for Duration -->
+        <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:11.5px;font-weight:700;color:var(--txt-muted)">DURATION TIMELINE</span>
+            <span style="font-size:11.5px;font-weight:800;color:var(--pri)" id="inspTimelineText">Day 1 of 5</span>
+          </div>
+          <div style="width:100%;height:8px;background:var(--bor);border-radius:4px;overflow:hidden">
+            <div id="inspProgressBar" style="height:100%;background:linear-gradient(90deg, #6366F1, #10B981);width:50%;border-radius:4px;transition:width 0.3s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:11.5px;font-weight:600;color:var(--txt)">
+            <span id="inspStartDate">Start: -</span>
+            <span id="inspEndDate">End: -</span>
+          </div>
+        </div>
+
+        <!-- Metric Grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="background:var(--input-bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--txt-muted);text-transform:uppercase">Duration</div>
+            <div style="font-size:18px;font-weight:800;color:var(--txt);margin-top:2px" id="inspDays">5 Days</div>
+          </div>
+          <div style="background:var(--input-bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--txt-muted);text-transform:uppercase">Budget (USD)</div>
+            <div style="font-size:18px;font-weight:800;color:var(--sec);margin-top:2px" id="inspBudget">$0</div>
+          </div>
+          <div style="background:var(--input-bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--txt-muted);text-transform:uppercase">Bill (BDT)</div>
+            <div style="font-size:18px;font-weight:800;color:var(--suc);margin-top:2px" id="inspTaka">৳0</div>
+          </div>
+          <div style="background:var(--input-bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--txt-muted);text-transform:uppercase">Campaign Type</div>
+            <div style="font-size:14px;font-weight:800;color:var(--txt);margin-top:4px" id="inspType">Boost</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" type="button" onclick="closeCampaignInspector()">Close</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-secondary" id="btnInspCopy" onclick="inspectorCopyRecord()" type="button" title="Copy standard campaign line" style="font-weight:700">
+            <span class="ms" style="font-size:15px">content_copy</span> Copy
+          </button>
+          <button class="btn btn-secondary" id="btnInspEdit" onclick="inspectorEditRecord()" type="button" title="Edit Campaign" style="color:var(--pri);border-color:rgba(99,102,241,0.35);background:rgba(99,102,241,0.1);font-weight:700">
+            <span class="ms" style="font-size:15px">edit</span> Edit
+          </button>
+          <button class="btn btn-secondary" id="btnInspDelete" onclick="inspectorDeleteRecord()" type="button" title="Delete Campaign" style="color:var(--dan);border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.1);font-weight:700">
+            <span class="ms" style="font-size:15px">delete</span> Delete
+          </button>
+          <button class="btn btn-secondary" id="btnInspIncrease" onclick="inspectorIncreaseRecord()" type="button" title="Increase Budget" style="color:var(--wrn);border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.1);font-weight:700">
+            <span class="ms" style="font-size:16px">trending_up</span> Increase
+          </button>
+          <button class="btn btn-primary" style="background:#25D366;border-color:#25D366;font-weight:700" onclick="openInspectorWhatsApp()" type="button">
+            <span class="ms" style="font-size:16px">chat</span> Client Notice
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Campaign Submenu Modal -->
+  <div class="modal-overlay hidden" id="mobileCampaignMenuModal" onclick="if(event.target===this)closeMobileCampaignMenu()">
+    <div class="modal" style="max-width:360px;width:92%;margin-top:auto;margin-bottom:20px;border-radius:20px;padding:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px 8px;border-bottom:1px solid var(--bor)">
+        <div style="font-weight:800;font-size:14px;color:var(--txt);display:flex;align-items:center;gap:6px">
+          <span class="ms" style="color:var(--pri)">campaign</span> Campaign Sub-Menus
+        </div>
+        <button class="btn-theme" type="button" onclick="closeMobileCampaignMenu()" style="width:28px;height:28px"><span class="ms" style="font-size:18px">close</span></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:10px 8px">
+        <button type="button" class="btn btn-secondary" onclick="selectMenuMobile('today_created_campaign')" style="justify-content:flex-start;padding:12px 14px;font-size:13.5px;font-weight:700;gap:10px;text-align:left">
+          <span class="ms" style="color:var(--pri);font-size:20px">today</span>
+          <div>
+            <div>Today Created</div>
+            <div style="font-size:11px;color:var(--txt-muted);font-weight:500">Today's active ad campaigns</div>
+          </div>
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="selectMenuMobile('end_ads')" style="justify-content:flex-start;padding:12px 14px;font-size:13.5px;font-weight:700;gap:10px;text-align:left">
+          <span class="ms" style="color:var(--dan);font-size:20px">event_busy</span>
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span>End Ads</span>
+              <span class="nav-badge-pill" id="endAdsMobileBadge" style="display:none;background:#EF4444;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:12px">0</span>
+            </div>
+            <div style="font-size:11px;color:var(--txt-muted);font-weight:500">Today & Tomorrow ending ads</div>
+          </div>
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="selectMenuMobile('campaign')" style="justify-content:flex-start;padding:12px 14px;font-size:13.5px;font-weight:700;gap:10px;text-align:left">
+          <span class="ms" style="color:var(--sec);font-size:20px">list_alt</span>
+          <div>
+            <div>All Campaigns</div>
+            <div style="font-size:11px;color:var(--txt-muted);font-weight:500">Monthly full campaign ledger</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Record Modal -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Edit Record</h3>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <form id="recordForm" class="form-grid"></form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnSaveRecord" type="button">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ad Account Billing Configuration Modal (Admin Only) -->
+  <div class="modal-overlay hidden" id="adBillingModalOverlay" onclick="if(event.target===this)closeAdBillingModal()">
+    <div class="modal" style="max-width:540px;width:95%">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#4F46E5,#818CF8);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">credit_card</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800" id="adBillingModalTitle">Ad Account Billing & Threshold</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Configure Due Amount, Threshold Limit & Billing Cycle</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAdBillingModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+        <div class="form-field">
+          <label>Ad Account Name *</label>
+          <input type="text" id="billModalAccountName" placeholder="e.g. Master Ads 01" list="billAccountList">
+          <datalist id="billAccountList"></datalist>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-field">
+            <label>Current Due Amount ($ USD) *</label>
+            <input type="number" id="billModalDueAmount" step="any" min="0" placeholder="e.g. 145.50">
+          </div>
+          <div class="form-field">
+            <label>Threshold Limit ($ USD) *</label>
+            <input type="number" id="billModalThreshold" step="any" min="1" placeholder="e.g. 500">
+            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(250)">$250</button>
+              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(500)">$500</button>
+              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(750)">$750</button>
+              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(900)">$900</button>
+              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(1000)">$1000</button>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-field">
+            <label>Next Billing Date (Auto-Charge)</label>
+            <input type="date" id="billModalBillingDate">
+          </div>
+          <div class="form-field">
+            <label>Account ID / ID Name</label>
+            <input type="text" id="billModalIdName" placeholder="e.g. act_123456789">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:12px">
+          <div class="form-field">
+            <label>Payment Method / Card Memo</label>
+            <input type="text" id="billModalPaymentMethod" placeholder="e.g. Visa •••• 4242">
+          </div>
+          <div class="form-field">
+            <label>Status</label>
+            <select id="billModalStatus">
+              <option value="active">Active (Normal)</option>
+              <option value="warning">Warning (Near Limit)</option>
+              <option value="critical">Critical (Threshold Full)</option>
+              <option value="paused">Paused / Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Notes / Memo</label>
+          <input type="text" id="billModalNotes" placeholder="e.g. Card limit resets on 1st, charges at $500 threshold">
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
+        <button class="btn btn-secondary" type="button" onclick="closeAdBillingModal()">Cancel</button>
+        <button class="btn btn-primary" type="button" id="btnSaveAdBilling" onclick="saveAdBillingModalForm()">
+          <span class="ms" style="font-size:16px">save</span> Save Account Billing
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1-Click Quick Update Due Modal (Admin Only) -->
+  <div class="modal-overlay hidden" id="quickDueModalOverlay" onclick="if(event.target===this)closeQuickDueModal()">
+    <div class="modal" style="max-width:440px;width:95%">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#F59E0B,#D97706);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">bolt</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:15.5px;font-weight:800">Quick Update Due Amount</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)" id="quickDueAccountSubtitle">Update Ads Manager Spend</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeQuickDueModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+        <div style="background:var(--card-elevated);padding:10px 14px;border-radius:8px;border:1px solid var(--bor)">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11.5px;font-weight:700;color:var(--txt-muted)">THRESHOLD LIMIT</span>
+            <span style="font-size:13px;font-weight:800;color:var(--pri)" id="quickDueThresholdDisplay">$500.00</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span style="font-size:11.5px;font-weight:700;color:var(--txt-muted)">CURRENT DUE ON FILE</span>
+            <span style="font-size:13px;font-weight:800;color:var(--dan)" id="quickDueCurrentDisplay">$0.00</span>
+          </div>
+        </div>
+        <div class="form-field">
+          <label style="display:flex;justify-content:space-between;align-items:center">
+            <span>New Due Amount ($ USD)</span>
+            <span style="font-size:11px;color:var(--txt-dim)">Enter actual Facebook Due</span>
+          </label>
+          <div style="position:relative">
+            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-weight:800;font-size:16px;color:var(--txt-muted)">$</span>
+            <input type="number" id="quickDueInput" step="any" min="0" placeholder="0.00" style="padding-left:28px;font-size:18px;font-weight:800;height:44px" oninput="updateQuickDuePreview()">
+          </div>
+          <!-- Quick Preset Increment Buttons -->
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <button type="button" class="preset-chip" onclick="quickDueAdjust(0, true)">Reset ($0)</button>
+            <button type="button" class="preset-chip" onclick="quickDueAdjust(10)">+$10</button>
+            <button type="button" class="preset-chip" onclick="quickDueAdjust(25)">+$25</button>
+            <button type="button" class="preset-chip" onclick="quickDueAdjust(50)">+$50</button>
+            <button type="button" class="preset-chip" onclick="quickDueAdjust(100)">+$100</button>
+          </div>
+        </div>
+        <div style="background:var(--card-subtle);padding:10px 12px;border-radius:8px;border:1px solid var(--bor);font-size:12px;display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--txt-sub)">Remaining Headroom After Update:</span>
+          <span style="font-weight:800;color:var(--suc)" id="quickDueHeadroomPreview">$500.00</span>
+        </div>
+        <div class="form-field" style="margin-top:2px">
+          <label style="display:flex;justify-content:space-between;align-items:center">
+            <span>Next Auto-Charge / Billing Date</span>
+            <span style="font-size:11px;color:var(--txt-dim)">From Ads Manager</span>
+          </label>
+          <input type="date" id="quickDueBillingDate">
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
+        <button class="btn btn-secondary" type="button" onclick="closeQuickDueModal()">Cancel</button>
+        <button class="btn btn-primary" type="button" id="btnSubmitQuickDue" onclick="submitQuickDueUpdate()">
+          <span class="ms" style="font-size:16px">bolt</span> Update Due Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Data Diagnostics & Parity Audit Modal -->
+  <div class="modal-overlay hidden" id="diagnosticsModalOverlay">
+    <div class="modal modal-lg" style="max-width:850px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gb);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">fact_check</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Google Sheet vs Web App — Data Parity & Diagnostic Audit</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Real-time verification chain: Single Source of Truth & Zero Data Loss</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeDiagnosticsModal()"><span class="ms">close</span></button>
+      </div>
+
+      <div class="modal-body" style="padding:20px">
+        <div id="diagnosticsLoading" style="text-align:center;padding:40px">
+          <div class="spinner" style="margin:0 auto 16px;width:32px;height:32px;border:3px solid var(--bor);border-top-color:var(--pri);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+          <div style="font-size:14px;font-weight:700">Running full-chain data diagnostic from Google Sheets...</div>
+          <div style="font-size:12px;color:var(--txt-muted);margin-top:6px">Auditing physical rows, column headers, duplicate records, backend response & frontend rendering</div>
+        </div>
+
+        <div id="diagnosticsContent" class="hidden">
+          <!-- Status Banner -->
+          <div id="diagStatusBanner" style="padding:14px 18px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+            <span class="ms" id="diagStatusIcon" style="font-size:28px">check_circle</span>
+            <div>
+              <div id="diagStatusTitle" style="font-size:15px;font-weight:800">Parity Status</div>
+              <div id="diagStatusDesc" style="font-size:12.5px;margin-top:2px;opacity:0.9"></div>
+            </div>
+          </div>
+
+          <!-- Parity Verification Chain Table -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:16px;margin-bottom:16px">
+            <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:12px">
+              📊 6-Stage Parity Verification Chain (Target vs Actual)
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));gap:10px;text-align:center">
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">1. Google Sheet</div>
+                <div id="diagChainSheet" style="font-size:18px;font-weight:800;color:var(--sec);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Physical Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">2. Backend Memory</div>
+                <div id="diagChainMemory" style="font-size:18px;font-weight:800;color:var(--pri);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Store Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">3. Backend RPC</div>
+                <div id="diagChainRpc" style="font-size:18px;font-weight:800;color:var(--suc);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Returned Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">4. Frontend State</div>
+                <div id="diagChainFrontend" style="font-size:18px;font-weight:800;color:var(--wrn);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Raw Records</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">5. Table Rendered</div>
+                <div id="diagChainRendered" style="font-size:18px;font-weight:800;color:var(--txt);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Displayed Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">6. Dashboard Total</div>
+                <div id="diagChainDashboard" style="font-size:18px;font-weight:800;color:var(--pri);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Campaign Stat</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deep Sheet Details Grid -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:10px">Worksheet Details</div>
+              <table style="width:100%;font-size:12px;line-height:1.8">
+                <tr><td style="color:var(--txt-muted)">Spreadsheet ID:</td><td style="font-family:monospace;text-align:right" id="diagSheetId"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Worksheet:</td><td style="font-weight:700;text-align:right" id="diagWorksheetName"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Header Row:</td><td style="text-align:right" id="diagHeaderRow">Row 1</td></tr>
+                <tr><td style="color:var(--txt-muted)">First Data Row:</td><td style="text-align:right;font-weight:600" id="diagFirstRow"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Last Data Row:</td><td style="text-align:right;font-weight:600" id="diagLastRow"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Total All Months:</td><td style="text-align:right;font-weight:800;color:var(--suc)" id="diagAllMonthsTotal"></td></tr>
+              </table>
+            </div>
+
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:10px">Data Integrity & Diagnostics</div>
+              <table style="width:100%;font-size:12px;line-height:1.8">
+                <tr><td style="color:var(--txt-muted)">Valid Records:</td><td style="text-align:right;font-weight:700;color:var(--suc)" id="diagValidCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Blank Rows:</td><td style="text-align:right" id="diagBlankCount">0</td></tr>
+                <tr><td style="color:var(--txt-muted)">Malformed Rows:</td><td style="text-align:right" id="diagMalformedCount">0</td></tr>
+                <tr><td style="color:var(--txt-muted)">Duplicate SLs in Sheet:</td><td style="text-align:right;font-weight:700" id="diagDupSLCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Duplicate Record IDs:</td><td style="text-align:right;font-weight:700" id="diagDupIdCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Single Source of Truth:</td><td style="text-align:right;font-weight:700;color:var(--suc)">Enforced (Google Sheets)</td></tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- All Tabs Breakdown -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+            <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:8px">All Worksheets Ingested</div>
+            <div id="diagTabsBreakdown" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
+        <button class="btn btn-secondary" type="button" onclick="closeDiagnosticsModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="runDiagnosticsCheck()">
+          <span class="ms" style="font-size:16px">refresh</span> Re-run Live Audit
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Sheet Data & Sync Hub Modal -->
+  <div class="modal-overlay hidden" id="sheetConfigOverlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gs);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">table_chart</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Google Sheet Data & Sync Hub</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Live Data Connector & Automated Synchronization</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeSheetConfigModal()"><span class="ms">close</span></button>
+      </div>
+
+      <div class="hub-tabs">
+        <button type="button" class="hub-tab active" onclick="switchHubTab('tab-sync')">
+          <span class="ms">sync_alt</span> 1. Live Sheet Sync
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-import')">
+          <span class="ms">content_paste_go</span> 2. Direct Import (Copy-Paste)
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-script')">
+          <span class="ms">code</span> 3. Apps Script (1-Click)
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-guide')">
+          <span class="ms">help_outline</span> 4. User Guide
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-backup')">
+          <span class="ms">folder_zip</span> 5. Download ZIP & Backup
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top:16px">
+        <!-- TAB 1: Live Sheet Sync -->
+        <div id="tab-sync" class="hub-panel">
+          <!-- Current Live Status -->
+          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--card-elevated);padding:12px 16px;border-radius:12px;border:1px solid var(--bor);margin-bottom:14px;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-size:11px;font-weight:800;color:var(--txt-muted);text-transform:uppercase">CURRENT LIVE STATUS</div>
+              <div style="font-size:13px;font-weight:700;margin-top:2px" id="hubStatusText">Connected with Google Sheet</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span id="sheetStatusBadge" class="pill pill-green">Live Connected ✅</span>
+              <button class="btn btn-secondary hidden" id="btnDisconnectSheet" onclick="disconnectGoogleSheet()" type="button" title="Disconnect this Google Sheet" style="padding:6px 12px;font-size:12px;color:var(--dan);border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.06);font-weight:700;display:inline-flex;align-items:center;gap:4px">
+                <span class="ms" style="font-size:15px">link_off</span> Disconnect Sheet
+              </button>
+            </div>
+          </div>
+
+          <!-- Direct Sheet URL / ID Input -->
+          <div class="form-field" style="margin-bottom:12px">
+            <label style="font-weight:700">Google Spreadsheet URL or Sheet ID *</label>
+            <input type="text" id="sheetIdInput" placeholder="Paste full Google Sheet Link (e.g. https://docs.google.com/spreadsheets/d/1BxiMVs.../edit)">
+            <small style="color:var(--txt-muted);font-size:11.5px;margin-top:4px">
+              💡 You can paste the full Google Sheet link or just the <b>Sheet ID</b>.
+            </small>
+          </div>
+
+          <!-- Primary Actions -->
+          <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btnSyncAllData" onclick="syncSpreadsheetData()" type="button" style="padding:10px 18px;font-size:13px;background:var(--pri);color:#fff">
+              <span class="ms" style="font-size:18px">download</span> Fetch & Sync from Sheet
+            </button>
+            <button class="btn btn-primary" id="btnPushAllData" onclick="pushAllDataToGoogleSheet()" type="button" style="padding:10px 18px;font-size:13px;background:linear-gradient(135deg,#059669,#10b981);color:#fff">
+              <span class="ms" style="font-size:18px">cloud_upload</span> Push All Data to Google Sheet
+            </button>
+            <button class="btn btn-secondary" id="btnSaveSheetConfig" onclick="saveSheetConfig()" type="button" style="padding:10px 16px">
+              <span class="ms" style="font-size:17px">save</span> Save Config
+            </button>
+            <button class="btn btn-secondary" id="btnClearAllDataBtn" onclick="clearLocalCache()" type="button" style="padding:10px 16px" title="Refresh and reload latest data from Google Sheet">
+              <span class="ms" style="font-size:17px">refresh</span> Refresh & Reload Sheet
+            </button>
+          </div>
+
+          <!-- Clean Instructions Card -->
+          <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12px;line-height:1.6">
+            <div style="font-weight:800;color:var(--pri);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:16px">verified</span> Effortless Google Sheet Connection (No login required):
+            </div>
+            <div style="color:var(--txt-sub)">
+              1. Open your Google Sheet and click <b>'Share'</b> in the top-right.<br>
+              2. Under <b>General access</b>, select <i>'Anyone with the link'</i> and click <b>Done</b>.<br>
+              3. Paste the URL in the box above and click <b>'Fetch & Sync from Sheet'</b> to instantly sync all data!
+            </div>
+          </div>
+
+          <!-- Apps Script Webhook -->
+          <div class="form-field" style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <label>Apps Script Webhook URL (For Direct Live Auto-Save to Sheet)</label>
+              <button class="btn btn-secondary" onclick="testWebhookConnection()" type="button" style="padding:2px 10px;font-size:11px">
+                <span class="ms" style="font-size:14px">network_ping</span> Test Connection
+              </button>
+            </div>
+            <input type="text" id="webhookUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+            <small style="color:var(--txt-muted);font-size:11.5px;margin-top:4px">
+              💡 When Web App URL is provided, all new entries will automatically save directly to Google Sheets.
+            </small>
+          </div>
+
+                    <!-- Date Format Setting -->
+          <div class="form-field" style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <label>📅 System Date Format (Apps & Google Sheet Sync)</label>
+              <button class="btn btn-secondary" onclick="formatAllSpreadsheetDatesNow()" type="button" style="padding:2px 10px;font-size:11px">
+                <span class="ms" style="font-size:14px">format_paint</span> Format All Dates in Sheet
+              </button>
+            </div>
+            <select id="configDateFormatSelect" onchange="setSystemDateFormat(this.value, true)" class="form-control" style="font-weight:600">
+              <option value="DD-MM-YYYY">12-10-2026 (DD-MM-YYYY) — Recommended</option>
+              <option value="DD/MM/YYYY">12/10/2026 (DD/MM/YYYY) — Slash</option>
+              <option value="DD-Mon-YYYY">12-Oct-2026 (DD-Mon-YYYY) — Alphanumeric</option>
+              <option value="YYYY-MM-DD">2026-10-12 (YYYY-MM-DD) — ISO Standard</option>
+              <option value="D-Mon-YYYY">1-Oct-2026 (D-Mon-YYYY) — Single-digit Day</option>
+            </select>
+            <small style="color:var(--txt-muted);font-size:11.5px;margin-top:4px">
+              💡 Controls date display throughout all app views, forms, WhatsApp notices, exports, and syncs directly into Google Sheets.
+            </small>
+          </div>
+
+          <!-- Google Account OAuth Sign-In (Optional Advanced Section) -->
+          <div style="background:var(--card-elevated);padding:12px 16px;border-radius:12px;border:1px solid var(--bor);margin-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:34px;height:34px;border-radius:50%;background:#ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,0.1)">
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.29 21.39 7.35 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15z"/>
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.29 2.61 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                </svg>
+              </div>
+              <div>
+                <div style="font-size:10.5px;font-weight:800;color:var(--txt-muted);text-transform:uppercase">GOOGLE ACCOUNT LOGIN <span class="pill" style="font-size:9.5px;padding:1px 5px;margin-left:4px">Optional</span></div>
+                <div style="font-size:12.5px;font-weight:600;margin-top:1px" id="googleAuthAccountLabel">Checking Google Account...</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="gsi-material-button" id="btnGoogleSignIn" onclick="handleGoogleSignIn()" type="button">
+                <div class="gsi-material-button-icon">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style="display: block; width:18px; height:18px;">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                    <path fill="none" d="M0 0h48v48H0z"></path>
+                  </svg>
+                </div>
+                <span>Sign in with Google</span>
+              </button>
+              <button class="btn btn-secondary hidden" id="btnGoogleSignOut" onclick="handleGoogleSignOut()" type="button" style="padding:6px 10px;font-size:11.5px">
+                <span class="ms" style="font-size:14px">logout</span> Disconnect
+              </button>
+            </div>
+          </div>
+
+          <div id="syncResultBox" class="hidden" style="margin-top:12px;padding:14px;border-radius:12px;background:rgba(16,185,129,.15);border:1.5px solid rgba(16,185,129,.3);color:#10B981;font-size:12.5px;font-weight:600">
+          </div>
+
+          <!-- SyncLogger: Live Synchronization History (Last 5 Logs) -->
+          <div style="margin-top:16px;background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:18px;color:var(--pri)">history_edu</span>
+                <span style="font-size:12.5px;font-weight:800;color:var(--txt);text-transform:uppercase;letter-spacing:0.3px">Synchronization History (Last 5 Events)</span>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <button type="button" class="btn btn-secondary" onclick="if(window.SyncLogger)window.SyncLogger.renderLogsToElement(document.getElementById('syncLogsContainer'),5)" style="padding:2px 8px;font-size:11px;font-weight:700" title="Refresh log view">
+                  <span class="ms" style="font-size:13px">refresh</span> Refresh
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="if(window.SyncLogger){window.SyncLogger.clearLogs();if(typeof showToast==='function')showToast('Sync history cleared','info');}" style="padding:2px 8px;font-size:11px;font-weight:700;color:var(--txt-muted)" title="Clear local sync logs">
+                  <span class="ms" style="font-size:13px">clear_all</span> Clear
+                </button>
+              </div>
+            </div>
+            <div id="syncLogsContainer" style="display:flex;flex-direction:column;gap:6px">
+              <div style="padding:12px;text-align:center;color:var(--txt-muted);font-size:11.5px">Loading sync history...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Direct Import -->
+        <div id="tab-import" class="hub-panel hidden">
+          <div style="background:var(--pri-light);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;color:var(--pri);font-size:12px">
+            💡 <b>Quick Import:</b> Copy rows from your Google Sheet or Excel and paste directly into the box below.
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+            <div class="form-field">
+              <label>Target Category</label>
+              <select id="importTargetCategory">
+                <option value="campaign">Campaign Data</option>
+                <option value="payments">Payment History</option>
+              </select>
+            </div>
+            <div class="form-field"><label>Month</label><select id="importMonthSelect"></select></div>
+            <div class="form-field"><label>Year</label><select id="importYearSelect"></select></div>
+          </div>
+
+          <div class="form-field" style="margin-bottom:14px">
+            <label>Paste Rows (Excel / Google Sheet Copy-Paste)</label>
+            <textarea id="importRawTextarea" rows="6" placeholder="001	Master Ad Account 1	Old Page	Page Name	2026-09-01	2026-09-06	Boost	5	50	140" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+          </div>
+
+          <button class="btn btn-primary" id="btnExecuteImport" onclick="executeRawImport()" type="button" style="padding:10px 18px">
+            <span class="ms" style="font-size:18px">file_upload</span> Import & Save Records
+          </button>
+        </div>
+
+        <!-- TAB 3: Apps Script Connector -->
+        <div id="tab-script" class="hub-panel hidden">
+          <div style="background:rgba(245,158,11,.15);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:12px 14px;margin-bottom:12px;color:var(--wrn);font-size:12px">
+            ⚡ <b>Google Apps Script Connector:</b> Adds a <b>"🚀 AdVerse Dashboard"</b> menu to your Google Sheet toolbar for 1-click sync.
+          </div>
+
+          <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);border-radius:12px;padding:12px 14px;margin-bottom:14px;color:#10B981;font-size:11.5px;line-height:1.6">
+            <div style="font-weight:800;margin-bottom:4px">🔐 One-time Google Authorization:</div>
+            When running the script for the first time in Apps Script:
+            <br>1. Click <b>Review permissions</b> ➔ 2. Select your Google account ➔ 3. Click <b>Advanced</b> ➔ 4. Click <b>Go to ... (unsafe)</b> and click <b>Allow</b>.
+          </div>
+
+          <div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:6px">Apps Script Code (Code.gs)</div>
+          <div style="position:relative">
+            <textarea id="appsScriptCodeArea" readonly rows="8" style="width:100%;font-family:monospace;font-size:11.5px;background:#0F172A;color:#38BDF8;outline:none"></textarea>
+            <button type="button" onclick="copyAppsScriptCode()" class="btn btn-primary" style="position:absolute;top:8px;right:8px;padding:5px 12px;font-size:11px">
+              <span class="ms" style="font-size:14px">content_copy</span> Copy Code
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 4: User Guide -->
+        <div id="tab-guide" class="hub-panel hidden">
+          <div style="display:grid;gap:12px">
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:#4285F4;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">★</span>
+                Direct Connection with Google Account (Recommended)
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                In Tab 1, click <b>"Connect Google Account"</b> and sign in with your Gmail. Then enter your Google Sheet link and click <b>"Fetch & Sync"</b> or <b>"Push All Data"</b> for instant two-way synchronization.
+              </p>
+            </div>
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">1</span>
+                Sync via Sheet URL or Sheet ID
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                Copy your Google Sheet URL from the browser, paste it in Tab 1, and click <b>"Fetch & Sync"</b>.
+              </p>
+            </div>
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">2</span>
+                Automatic Historical Tab Detection
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                The system automatically detects tabs like <code>Campaign_September_2026</code>, <code>Payments</code>, <code>Page List</code>, etc., and loads all data seamlessly.
+              </p>
+            </div>
+            <div style="background:var(--card-elevated);border:1px solid rgba(16,185,129,0.35);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:#10B981;display:flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:18px">calendar_month</span>
+                Best Date Format for Sheet & App: DD-Mon-YYYY (e.g. 11-Oct-2026)
+              </div>
+              <p style="margin:6px 0 0 24px;font-size:12px;color:var(--txt);line-height:1.5">
+                <b>কেন DD-Mon-YYYY সেরা?</b> গুগল শিট-এ রিজিওনাল সেটিংসের কারণে <code>10/05/2026</code> লিখলে শিট কখনো October 5 আবার কখনো May 10 ধরে ফেলে। কিন্তু <b>11-Oct-2026</b> দিলে শিট এবং অ্যাপস দুটোতেই মাস ও দিনের কোনো কনফিউশন হয় না। অ্যাপটিতে ডেট এন্ট্রি দিলে তা স্বয়ংক্রিয়ভাবে এই স্ট্যান্ডার্ড ফরম্যাটে সেভ হয়।
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: Download ZIP & Project Backup -->
+        <div id="tab-backup" class="hub-panel hidden">
+          <div style="background:var(--card-elevated);border:1.5px solid rgba(16,185,129,0.35);border-radius:14px;padding:18px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:10px;background:#10B981;color:#fff;display:flex;align-items:center;justify-content:center">
+                <span class="ms" style="font-size:24px">folder_zip</span>
+              </div>
+              <div>
+                <h4 style="margin:0;font-size:15px;font-weight:800;color:var(--txt)">Download Complete App Source Code (.ZIP)</h4>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">Offline backup with all files, configuration, and backend scripts</p>
+              </div>
+            </div>
+
+            <p style="font-size:12.5px;line-height:1.6;color:var(--txt);margin:0 0 16px">
+              Click the button below to download the complete project <b>.ZIP</b> archive to your device.
+            </p>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button type="button" onclick="downloadZipBlob('fullSource', 'adverse-agency-project.zip')" class="btn btn-primary" style="padding:10px 18px;font-size:13.5px;font-weight:700;display:inline-flex;align-items:center;gap:8px;background:#10B981;cursor:pointer">
+                <span class="ms" style="font-size:18px">download</span> Download Source Code (.ZIP)
+              </button>
+              <a href="/adverse-agency-source.zip" download="adverse-agency-project.zip" class="btn btn-secondary" style="text-decoration:none;padding:10px 16px;font-size:13px;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:17px">cloud_download</span> Direct Server Link
+              </a>
+            </div>
+          </div>
+
+          <!-- Apps Script Standalone Web App Edition (Code.gs & index.html) -->
+          <div style="background:var(--card-elevated);border:1.5px solid rgba(99,102,241,0.4);border-radius:14px;padding:18px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:10px;background:var(--pri);color:#fff;display:flex;align-items:center;justify-content:center">
+                <span class="ms" style="font-size:24px">code_blocks</span>
+              </div>
+              <div>
+                <h4 style="margin:0;font-size:15px;font-weight:800;color:var(--txt)">Google Apps Script Standalone Web App (Code.gs + index.html)</h4>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">Ready-to-deploy files for running directly on Google Drive / Sheets</p>
+              </div>
+            </div>
+
+            <p style="font-size:12.5px;line-height:1.6;color:var(--txt);margin:0 0 14px">
+              In your Google Sheet, navigate to <b>Extensions &gt; Apps Script</b> and deploy <code>Code.gs</code> and <code>index.html</code> as a Web App.
+            </p>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+              <button type="button" onclick="downloadZipBlob('appsScript', 'adverse-apps-script-suite.zip')" class="btn btn-primary" style="padding:9px 16px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+                <span class="ms" style="font-size:17px">download</span> Instant Download .ZIP (Direct)
+              </button>
+              <button type="button" onclick="openCodeExporterModal()" class="btn btn-primary" style="background:#10B981;padding:9px 16px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+                <span class="ms" style="font-size:17px">content_copy</span> 1-Click Copy Code (In App)
+              </button>
+            </div>
+          </div>
+
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:17px;color:var(--pri)">help</span> How to transfer to another account or local machine
+            </div>
+            <ol style="margin:0;padding-left:20px;font-size:12px;color:var(--txt-muted);line-height:1.7">
+              <li>Click <b>"Download Source Code (.ZIP)"</b> above.</li>
+              <li>Log into your account at <b style="color:var(--pri)">ai.studio/build</b>.</li>
+              <li>Click <b>Import</b> or <b>Upload ZIP</b> to deploy the complete app instantly.</li>
+              <li>Alternatively, unzip on your local computer and run <code>npm install</code> and <code>npm run dev</code>.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeSheetConfigModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Auth Guidance / Alternative Connection Modal -->
+  <div class="modal-overlay hidden" id="googleAuthGuideOverlay" style="z-index:99999" onclick="if(event.target===this)closeGoogleAuthGuideModal()">
+    <div class="modal modal-md">
+      <div class="modal-header" style="border-bottom:1px solid var(--bor)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(99,102,241,0.12);display:flex;align-items:center;justify-content:center;color:var(--pri)">
+            <span class="ms" style="font-size:22px">info</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:15px;font-weight:800">Direct Sync Active (No Sign-in Required)</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Google Authentication Domain Notice & Solution</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeGoogleAuthGuideModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;font-size:13px;line-height:1.6">
+        <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:12px 14px;margin-bottom:16px;color:var(--wrn);font-size:12px">
+          <b>Notice:</b> Standard OAuth pop-ups are restricted on cloud preview domains.
+        </div>
+
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:8px;color:var(--txt)">
+          ✅ Connect your Google Sheet effortlessly via:
+        </div>
+
+        <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px;margin-bottom:14px;font-size:12.5px">
+          <div style="font-weight:700;color:var(--pri);margin-bottom:6px">Method 1: 30-Second Link Share (Fastest & Easiest)</div>
+          <ol style="margin:0 0 0 18px;padding:0;color:var(--txt-sub);line-height:1.7">
+            <li>Open your Google Sheet and click the <b>'Share'</b> button in top right.</li>
+            <li>Under <b>General access</b>, select <i>'Anyone with the link'</i> and click <b>Done</b>.</li>
+            <li>Return to dashboard and click <b>'Fetch & Sync from Sheet'</b> to instantly sync all data!</li>
+          </ol>
+        </div>
+
+        <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px;margin-bottom:16px;font-size:12.5px">
+          <div style="font-weight:700;color:#10b981;margin-bottom:6px">Method 2: Apps Script Webhook (Automatic 2-Way Sync)</div>
+          <div style="color:var(--txt-sub);line-height:1.6">
+            Paste the code from <b>Tab 3 (Apps Script)</b> into your Sheet's <i>Extensions &gt; Apps Script</i>. This adds the '🚀 AdVerse Dashboard' menu and automatically syncs every entry.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn btn-primary" type="button" onclick="closeGoogleAuthGuideModal();syncSpreadsheetData();" style="padding:9px 18px;background:var(--pri);color:#fff">
+            <span class="ms" style="font-size:17px">sync</span> Fetch & Sync Now
+          </button>
+          <button class="btn btn-secondary" type="button" onclick="closeGoogleAuthGuideModal()" style="padding:9px 16px">
+            Got it (Close)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Role Links Modal -->
+  <div class="modal-overlay hidden" id="roleLinksOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3><span class="ms" style="font-size:20px;vertical-align:middle;margin-right:6px">link</span> Access Links & Roles</h3>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeRoleLinksModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin:0 0 16px;font-size:13px;color:var(--txt-muted)">
+          Share these direct access links with your team for instant one-click login.
+        </p>
+
+        <!-- Admin Card -->
+        <div style="background:var(--pri-light);border:1.5px solid rgba(99,102,241,.3);border-radius:14px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:14px;color:var(--pri);display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:18px">admin_panel_settings</span> Admin Link (Full Access)
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="pill pill-purple" id="adminPinPill">PIN: 01726912624</span>
+              <button class="btn btn-secondary" type="button" onclick="closeRoleLinksModal(); openChangePinModal();" style="font-size:11.5px;padding:3px 8px;height:24px;line-height:1">
+                <span class="ms" style="font-size:13px">key</span> Change PIN
+              </button>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="adminLinkInput" readonly style="flex:1;min-height:36px;padding:6px 10px;font-size:12px;background:var(--input-bg);color:var(--txt)" value="">
+            <button class="btn btn-primary" type="button" onclick="copyLink('adminLinkInput')">
+              <span class="ms" style="font-size:15px">content_copy</span> Copy
+            </button>
+          </div>
+        </div>
+
+        <!-- Viewer Card -->
+        <div style="background:var(--suc-light);border:1.5px solid rgba(16,185,129,.3);border-radius:14px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:14px;color:var(--suc);display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:18px">visibility</span> Viewer Link (Read-Only)
+            </div>
+            <span class="pill pill-green" id="viewerPinPill">PIN: 01893231534</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="viewerLinkInput" readonly style="flex:1;min-height:36px;padding:6px 10px;font-size:12px;background:var(--input-bg);color:var(--txt)" value="">
+            <button class="btn btn-primary" style="background:var(--gs)" type="button" onclick="copyLink('viewerLinkInput')">
+              <span class="ms" style="font-size:15px">content_copy</span> Copy
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeRoleLinksModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Change Admin PIN Modal -->
+  <div class="modal-overlay hidden" id="changePinOverlay">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gp);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">lock_reset</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Change Admin PIN / Password</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Alphanumeric Password Complexity Security</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeChangePinModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin:0 0 14px;font-size:12.5px;color:var(--txt-muted);line-height:1.5">
+          For dashboard security, choose a strong alphanumeric PIN or password. Avoid simple sequential numbers (e.g. <code>123456</code> or <code>111111</code>).
+        </p>
+
+        <form id="changePinForm" onsubmit="event.preventDefault(); submitChangeAdminPin();">
+          <div class="form-group" style="margin-bottom:12px">
+            <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">Current Admin PIN</label>
+            <div style="position:relative">
+              <input type="password" id="currentPinInput" class="form-control" placeholder="e.g. 01726912624" required style="letter-spacing:2px;font-size:15px;padding-right:38px">
+              <button type="button" onclick="toggleFieldVis('currentPinInput', this)" title="Show / Hide" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt-muted);cursor:pointer;padding:4px;display:flex;align-items:center">
+                <span class="ms" style="font-size:18px">visibility</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:8px">
+            <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">New Admin PIN / Password</label>
+            <div style="position:relative">
+              <input type="password" id="newPinInput" class="form-control" placeholder="e.g. AdVerse2026 or Admin@99" maxlength="32" oninput="handleNewPinInput(this.value)" required style="letter-spacing:2px;font-size:15px;padding-right:38px">
+              <button type="button" onclick="toggleFieldVis('newPinInput', this)" title="Show / Hide" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt-muted);cursor:pointer;padding:4px;display:flex;align-items:center">
+                <span class="ms" style="font-size:18px">visibility</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Password Strength Meter -->
+          <div id="pwdStrengthWrap" style="margin-bottom:14px;background:var(--card-elevated);border:1px solid var(--bor);border-radius:10px;padding:10px 12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:var(--txt-muted)">Password Strength:</span>
+              <span id="pwdStrengthLabel" style="font-size:11px;font-weight:800;color:var(--txt-dim)">Type PIN...</span>
+            </div>
+            <!-- Progress Bars -->
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;height:5px;margin-bottom:8px">
+              <div id="pwdBar1" style="height:100%;border-radius:3px;background:var(--bor);transition:.2s"></div>
+              <div id="pwdBar2" style="height:100%;border-radius:3px;background:var(--bor);transition:.2s"></div>
+              <div id="pwdBar3" style="height:100%;border-radius:3px;background:var(--bor);transition:.2s"></div>
+              <div id="pwdBar4" style="height:100%;border-radius:3px;background:var(--bor);transition:.2s"></div>
+            </div>
+            <!-- Requirements Checklist -->
+            <div style="display:flex;flex-direction:column;gap:4px;font-size:11px">
+              <div id="chkLen" style="display:flex;align-items:center;gap:6px;color:var(--txt-muted)">
+                <span class="ms" style="font-size:14px">radio_button_unchecked</span>
+                <span>Minimum 6 characters</span>
+              </div>
+              <div id="chkAlpha" style="display:flex;align-items:center;gap:6px;color:var(--txt-muted)">
+                <span class="ms" style="font-size:14px">radio_button_unchecked</span>
+                <span>Both letters [A-Z/a-z] & numbers [0-9]</span>
+              </div>
+              <div id="chkSeq" style="display:flex;align-items:center;gap:6px;color:var(--txt-muted)">
+                <span class="ms" style="font-size:14px">radio_button_unchecked</span>
+                <span>No simple sequence (e.g. 123456, 111111)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px">
+            <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">Confirm New PIN</label>
+            <div style="position:relative">
+              <input type="password" id="confirmNewPinInput" class="form-control" placeholder="Re-enter new PIN" maxlength="32" oninput="handleConfirmPinInput()" required style="letter-spacing:2px;font-size:15px;padding-right:38px">
+              <button type="button" onclick="toggleFieldVis('confirmNewPinInput', this)" title="Show / Hide" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt-muted);cursor:pointer;padding:4px;display:flex;align-items:center">
+                <span class="ms" style="font-size:18px">visibility</span>
+              </button>
+            </div>
+            <div id="confirmMatchNotice" style="display:none;font-size:11px;font-weight:700;margin-top:4px"></div>
+          </div>
+
+          <div id="pinChangeErrorMsg" style="display:none;padding:8px 12px;background:rgba(239,68,68,0.1);color:#EF4444;border-radius:8px;font-size:12px;margin-bottom:14px"></div>
+
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-secondary" type="button" onclick="closeChangePinModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitChangePin" type="button" onclick="submitChangeAdminPin()">
+              <span class="ms" style="font-size:16px">lock_reset</span> Update PIN
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIN Login Overlay -->
+  <div id="pinLoginOverlay" style="position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:20px;background:radial-gradient(ellipse at 50% 20%, #1E1B4B 0%, #0F172A 100%);font-family:Inter,system-ui,sans-serif">
+    <div style="width:100%;max-width:420px;background:var(--card);border-radius:24px;padding:36px 30px;box-shadow:0 30px 80px rgba(0,0,0,.65);text-align:center;position:relative;border:1px solid var(--bor)">
+      <div style="width:56px;height:56px;border-radius:18px;background:var(--gp);display:inline-flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 10px 25px -4px rgba(99,102,241,.5);margin-bottom:14px">
+        <span class="ms" style="font-size:30px">lock</span>
+      </div>
+      <h2 style="margin:0;color:var(--txt);font-size:22px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-.02em">AdVerse Agency</h2>
+      <p style="margin:6px 0 20px;color:var(--txt-muted);font-size:13px;font-weight:500">Enter access PIN or password to unlock dashboard</p>
+      
+      <form onsubmit="event.preventDefault(); submitPinLogin();" style="margin:0">
+        <div style="margin-bottom:14px;position:relative">
+          <input id="pinLoginInput" type="password" inputmode="text" placeholder="PIN or Password" maxlength="32" autofocus autocomplete="off" style="width:100%;padding:14px 44px 14px 16px;border:2px solid var(--bor);border-radius:14px;font-size:20px;text-align:center;outline:none;letter-spacing:4px;font-weight:800;color:var(--txt);background:var(--input-bg);transition:.2s">
+          <button type="button" onclick="togglePinVisibility()" id="btnTogglePinVis" title="Show / Hide PIN" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt-muted);cursor:pointer;padding:6px;display:flex;align-items:center">
+            <span class="ms" id="pinVisIcon" style="font-size:20px">visibility</span>
+          </button>
+        </div>
+        
+        <div id="pinLoginError" style="display:none;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#EF4444;font-size:12.5px;font-weight:600"></div>
+        
+        <button id="pinLoginBtn" type="submit" style="width:100%;padding:14px;border:0;border-radius:14px;background:var(--gp);color:#fff;font-size:15px;font-weight:800;letter-spacing:.2px;cursor:pointer;box-shadow:0 8px 24px -4px rgba(99,102,241,.5);transition:.2s;display:flex;align-items:center;justify-content:center;gap:6px">
+          <span class="ms" style="font-size:19px">key</span> Unlock Dashboard
+        </button>
+
+      </form>
+    </div>
+  </div>
+
+  <!-- Exchange Rate Quick Adjuster Modal -->
+  <div class="modal-overlay hidden" id="rateModalOverlay" onclick="if(event.target===this)closeRateModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gw);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">currency_exchange</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">USD Exchange Rate</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Adjust conversion rate for all campaigns & billing</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeRateModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field" style="margin-bottom:14px">
+          <label>Dollar to BDT Rate (1 USD = ? ৳)</label>
+          <input type="number" id="inputNewRate" value="140" step="any" style="font-size:16px;font-weight:800;text-align:center">
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+          <button class="btn btn-secondary" onclick="setQuickRate(138)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳138</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(140)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳140</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(142)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳142</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(145)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳145</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeRateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewRate()" type="button">
+          <span class="ms" style="font-size:16px">check</span> Update Rate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ad Accounts & Pages Manager Modal -->
+  <div class="modal-overlay hidden" id="adAccountsPagesOverlay" onclick="if(event.target===this)closeAdAccountsPagesModal()">
+    <div class="modal" style="max-width:750px;width:95%">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:38px;height:38px;border-radius:12px;background:var(--gp);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:22px">manage_accounts</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:17px;font-weight:800">AD Accounts & Page Names Manager</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">Pre-configure Ad Accounts and Page Names for instant dropdown auto-complete</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAdAccountsPagesModal()"><span class="ms">close</span></button>
+      </div>
+
+      <!-- Manager Tabs -->
+      <div style="display:flex;gap:8px;padding:0 24px;border-bottom:1px solid var(--bor);margin-bottom:16px;background:var(--card-elevated)">
+        <button type="button" id="tabBtnAdAccounts" class="nav-btn active" style="border-radius:0;border-bottom:2px solid var(--pri);padding:10px 14px;font-size:13px;font-weight:700" onclick="switchManagerTab('ad_accounts')">
+          <span class="ms" style="font-size:17px">badge</span> AD Accounts (<span id="countAdAccounts">0</span>)
+        </button>
+        <button type="button" id="tabBtnPages" class="nav-btn" style="border-radius:0;padding:10px 14px;font-size:13px;font-weight:700" onclick="switchManagerTab('pages')">
+          <span class="ms" style="font-size:17px">pages</span> Page Names (<span id="countPages">0</span>)
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top:0;max-height:65vh;overflow-y:auto">
+        <!-- TAB 1: AD Accounts -->
+        <div id="managerTabAdAccounts">
+          <!-- Add Single AD Account -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:800;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+              <span class="ms" style="font-size:18px;color:var(--pri)">add_circle</span> Add New AD Account
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">AD Account Name *</label>
+                <input type="text" id="newAdAccountName" placeholder="e.g. Akash - Ad 01" style="min-height:36px">
+              </div>
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">ID Name / ID Number</label>
+                <input type="text" id="newAdAccountId" placeholder="e.g. ID: 98451241" style="min-height:36px">
+              </div>
+              <button class="btn btn-primary" type="button" onclick="submitNewAdAccount()" style="min-height:36px;white-space:nowrap">
+                <span class="ms" style="font-size:16px">add</span> Save Account
+              </button>
+            </div>
+          </div>
+
+          <!-- Bulk Paste AD Accounts Accordion -->
+          <details style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:12px 16px;margin-bottom:16px">
+            <summary style="font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">
+              <span class="ms" style="font-size:17px;color:var(--wrn)">content_paste</span> Bulk Import AD Accounts (Paste multiple accounts)
+            </summary>
+            <div style="margin-top:12px">
+              <p style="font-size:12px;color:var(--txt-muted);margin:0 0 8px">
+                Paste each line as <code>Account Name, ID Name</code> or just <code>Account Name</code>:
+              </p>
+              <textarea id="bulkAdAccountsInput" rows="4" placeholder="Akash - Ad 01, ID: 102938192&#10;Agency Global 02, ID: 293847182&#10;Agency Account 03" style="width:100%;font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--input-bg);color:var(--txt);border:1px solid var(--bor)"></textarea>
+              <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <button class="btn btn-primary" type="button" onclick="submitBulkAdAccounts()">
+                  <span class="ms" style="font-size:16px">upload</span> Import All AD Accounts
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <!-- List of AD Accounts -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt)">Saved AD Accounts List:</div>
+            <input type="text" id="searchAdAccounts" placeholder="Search accounts..." oninput="filterAdAccountsList(this.value)" style="width:200px;min-height:32px;font-size:12px;padding:4px 8px">
+          </div>
+          <div style="border:1px solid var(--bor);border-radius:12px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:var(--card-elevated);border-bottom:1px solid var(--bor);text-align:left">
+                  <th style="padding:10px 12px">AD Account Name</th>
+                  <th style="padding:10px 12px">ID Name / Info</th>
+                  <th style="padding:10px 12px;text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="adAccountsTableBody">
+                <tr><td colspan="3" style="text-align:center;padding:20px;color:var(--txt-muted)">Loading AD Accounts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 2: Page List -->
+        <div id="managerTabPages" class="hidden">
+          <!-- Add Single Page -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:800;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+              <span class="ms" style="font-size:18px;color:var(--pri)">add_circle</span> Add New Page Name
+            </div>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end">
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">Facebook Page Name *</label>
+                <input type="text" id="newPageNameInput" placeholder="e.g. Trendy Lifestyle BD" style="min-height:36px">
+              </div>
+              <button class="btn btn-primary" type="button" onclick="submitNewPageName()" style="min-height:36px;white-space:nowrap">
+                <span class="ms" style="font-size:16px">add</span> Save Page
+              </button>
+            </div>
+          </div>
+
+          <!-- Bulk Paste Pages Accordion -->
+          <details style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:12px 16px;margin-bottom:16px">
+            <summary style="font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">
+              <span class="ms" style="font-size:17px;color:var(--wrn)">content_paste</span> Bulk Import Pages (Paste multiple pages)
+            </summary>
+            <div style="margin-top:12px">
+              <p style="font-size:12px;color:var(--txt-muted);margin:0 0 8px">
+                Paste one page name per line:
+              </p>
+              <textarea id="bulkPagesInput" rows="5" placeholder="Page Name 1&#10;Page Name 2&#10;Page Name 3&#10;Page Name 4" style="width:100%;font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--input-bg);color:var(--txt);border:1px solid var(--bor)"></textarea>
+              <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <button class="btn btn-primary" type="button" onclick="submitBulkPages()">
+                  <span class="ms" style="font-size:16px">upload</span> Import All Pages
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <!-- List of Pages -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt)">Saved Page Names List:</div>
+            <input type="text" id="searchPages" placeholder="Search pages..." oninput="filterPagesList(this.value)" style="width:200px;min-height:32px;font-size:12px;padding:4px 8px">
+          </div>
+          <div style="border:1px solid var(--bor);border-radius:12px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:var(--card-elevated);border-bottom:1px solid var(--bor);text-align:left">
+                  <th style="padding:10px 12px">#</th>
+                  <th style="padding:10px 12px">Page Name</th>
+                  <th style="padding:10px 12px;text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="pagesTableBody">
+                <tr><td colspan="3" style="text-align:center;padding:20px;color:var(--txt-muted)">Loading Pages...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeAdAccountsPagesModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-App Google Apps Script 1-Click Code Exporter Modal -->
+  <div class="modal-overlay hidden" id="codeExporterOverlay" style="z-index:99999">
+    <div class="modal" style="max-width:900px;width:95%;max-height:90vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:34px;height:34px;border-radius:8px;background:#10B981;color:#fff;display:flex;align-items:center;justify-content:center">
+            <span class="ms" style="font-size:20px">content_copy</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800;color:var(--txt)">Google Apps Script 1-Click Code Exporter</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Ready-to-paste scripts for Google Sheets Apps Script integration</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeCodeExporterModal()"><span class="ms">close</span></button>
+      </div>
+
+      <!-- Tabs for files -->
+      <div style="display:flex;gap:6px;padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--bor);overflow-x:auto">
+        <button class="btn btn-secondary exp-nav-btn active" id="btnExpTab_sync_connector" onclick="switchTabKey('sync_connector', this)" style="padding:6px 12px;font-size:12px;font-weight:700">⚡ Live Sync Connector</button>
+        <button class="btn btn-secondary exp-nav-btn" id="btnExpTab_codegs" onclick="switchTabKey('codegs', this)" style="padding:6px 12px;font-size:12px;font-weight:700">Code.gs (Backend)</button>
+        <button class="btn btn-secondary exp-nav-btn" id="btnExpTab_index_html" onclick="switchTabKey('index_html', this)" style="padding:6px 12px;font-size:12px;font-weight:700">index.html</button>
+        <button class="btn btn-secondary exp-nav-btn" id="btnExpTab_stylesheet" onclick="switchTabKey('stylesheet', this)" style="padding:6px 12px;font-size:12px;font-weight:700">stylesheet.html</button>
+        <button class="btn btn-secondary exp-nav-btn" id="btnExpTab_javascript" onclick="switchTabKey('javascript', this)" style="padding:6px 12px;font-size:12px;font-weight:700">javascript.html</button>
+        <button class="btn btn-secondary exp-nav-btn" id="btnExpTab_single_bundle" onclick="switchTabKey('single_bundle', this)" style="padding:6px 12px;font-size:12px;font-weight:700">All-in-One index.html</button>
+      </div>
+
+      <div class="modal-body" style="padding:16px;flex:1;display:flex;flex-direction:column;gap:10px;min-height:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <span style="font-weight:800;font-size:13px;color:var(--txt)" id="expFileName">index.html</span>
+            <span style="font-size:11.5px;color:var(--txt-muted);margin-left:8px" id="expFileDesc">Paste into index.html in Google Sheet Apps Script</span>
+          </div>
+          <button type="button" class="btn btn-primary" id="expCopyBtn" onclick="copyExporterCode()" style="background:#10B981;padding:8px 16px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <span class="ms" style="font-size:17px">content_copy</span> <span id="expCopyBtnText">1-Click Copy This File</span>
+          </button>
+        </div>
+
+        <textarea id="expCodeBox" readonly spellcheck="false" style="flex:1;width:100%;min-height:350px;background:var(--bg);color:var(--txt);border:1px solid var(--bor);border-radius:10px;padding:14px;font-family:monospace;font-size:12px;line-height:1.5;resize:none"></textarea>
+      </div>
+
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
+        <button type="button" class="btn btn-primary" onclick="downloadZipBlob('appsScript', 'adverse-apps-script-suite.zip')" style="padding:8px 14px;font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
+          <span class="ms" style="font-size:16px">download</span> Download All (.ZIP)
+        </button>
+        <button class="btn btn-secondary" type="button" onclick="closeCodeExporterModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF Export Preview Modal -->
+  <div class="modal-overlay hidden" id="pdfPreviewModal">
+    <div class="modal-card" style="max-width:960px;width:95vw;max-height:92vh;display:flex;flex-direction:column">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--bor)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="ms" style="color:#EF4444;font-size:24px">picture_as_pdf</span>
+          <div>
+            <h3 style="margin:0;font-size:15px;font-weight:800" id="pdfModalTitle">Campaign Report PDF</h3>
+            <span style="font-size:11.5px;color:var(--txt-muted)" id="pdfModalSubtitle">Print or Save Document</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-primary" onclick="triggerDirectPrint()" type="button" style="padding:6px 14px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#EF4444;border-color:#EF4444">
+            <span class="ms" style="font-size:16px">print</span> Print / Save PDF
+          </button>
+          <button class="btn-theme" onclick="closePdfModal()" type="button" title="Close Preview">
+            <span class="ms" style="font-size:18px">close</span>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body" style="flex:1;overflow:auto;padding:16px;background:#f8fafc">
+        <div id="pdfPaperContainer" style="background:#fff;color:#0f172a;padding:24px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.06);max-width:100%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Floating Row Focus Action Menu -->
+  <div class="row-focus-menu hidden" id="rowFocusFloatingMenu" role="toolbar" aria-label="Row Focus Action Menu">
+    <div class="rf-header">
+      <div class="rf-badge-row">
+        <span class="rf-pulse-dot" title="Active Focus Mode"></span>
+        <span class="rf-row-index-pill" id="rfRowIndexTag">ROW #1</span>
+      </div>
+      <div class="rf-info-text">
+        <span class="rf-page-title" id="rfPageNameTag">Page Name</span>
+        <div class="rf-meta-chips">
+          <span class="rf-chip-budget" id="rfBudgetTag">$0</span>
+          <span class="rf-chip-taka" id="rfTakaTag">৳0</span>
+          <span class="rf-chip-type" id="rfTypeTag">Boost</span>
+          <span class="rf-chip-status" id="rfStatusTag">Active</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rf-separator"></div>
+
+    <div class="rf-action-buttons">
+      <!-- 1. Edit Record (Primary Action) -->
+      <button class="rf-btn rf-btn-edit" id="rfBtnEdit" onclick="rfActionEdit()" type="button" title="Edit Campaign (Press E)">
+        <span class="ms">edit</span>
+        <span class="rf-btn-text">Edit</span>
+        <kbd class="rf-kbd">E</kbd>
+      </button>
+
+      <!-- 2. Quick Increase Budget (Primary Action) -->
+      <button class="rf-btn rf-btn-increase" id="rfBtnIncrease" onclick="rfActionIncrease()" type="button" title="Quick Increase Budget (Press +)">
+        <span class="ms">trending_up</span>
+        <span class="rf-btn-text">Increase</span>
+        <kbd class="rf-kbd">+</kbd>
+      </button>
+
+      <!-- 3. Delete Record (Primary Action) -->
+      <button class="rf-btn rf-btn-delete" id="rfBtnDelete" onclick="rfActionDelete()" type="button" title="Delete Campaign (Press Del)">
+        <span class="ms">delete</span>
+        <span class="rf-btn-text">Delete</span>
+        <kbd class="rf-kbd">Del</kbd>
+      </button>
+
+      <!-- 4. Copy Format -->
+      <button class="rf-btn rf-btn-copy" id="rfBtnCopy" onclick="rfActionCopy()" type="button" title="Copy Campaign Format (Press C)">
+        <span class="ms">content_copy</span>
+        <span class="rf-btn-text">Copy</span>
+        <kbd class="rf-kbd">C</kbd>
+      </button>
+
+      <!-- 5. WhatsApp Notice -->
+      <button class="rf-btn rf-btn-wa" id="rfBtnWa" onclick="rfActionWhatsApp()" type="button" title="Send WhatsApp Notice (Press W)">
+        <span class="ms">chat</span>
+        <span class="rf-btn-text">WhatsApp</span>
+        <kbd class="rf-kbd">W</kbd>
+      </button>
+
+      <!-- 6. Duplicate / Clone -->
+      <button class="rf-btn rf-btn-clone" id="rfBtnClone" onclick="rfActionClone()" type="button" title="Duplicate / Clone Campaign (Press D)">
+        <span class="ms">library_add</span>
+        <span class="rf-btn-text">Clone</span>
+        <kbd class="rf-kbd">D</kbd>
+      </button>
+
+      <!-- 7. Full Inspector Details -->
+      <button class="rf-btn rf-btn-inspect" id="rfBtnInspect" onclick="rfActionInspect()" type="button" title="Full Inspector Details (Press I)">
+        <span class="ms">visibility</span>
+        <span class="rf-btn-text">Inspect</span>
+        <kbd class="rf-kbd">I</kbd>
+      </button>
+    </div>
+
+    <div class="rf-separator"></div>
+
+    <!-- Navigation & Close Controls -->
+    <div class="rf-nav-controls">
+      <button class="rf-nav-btn" onclick="focusPreviousRow()" type="button" title="Previous Row (↑ or K)">
+        <span class="ms">expand_less</span>
+      </button>
+      <button class="rf-nav-btn" onclick="focusNextRow()" type="button" title="Next Row (↓ or J)">
+        <span class="ms">expand_more</span>
+      </button>
+      <button class="rf-nav-btn rf-nav-close" onclick="clearRowFocus()" type="button" title="Exit Focus Mode (Esc)">
+        <span class="ms">close</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Floating Scroll To Top Button -->
+  <button class="scroll-top-btn" id="btnScrollTop" onclick="scrollToTopSmooth()" type="button" title="Scroll to Top">
+    <span class="ms">arrow_upward</span>
+  </button>
+
+  <!-- Floating Mobile PWA Install Banner -->
+  <div id="pwaMobileBanner" class="hidden" style="position:fixed;bottom:16px;left:16px;right:16px;z-index:9999;background:var(--card);border:1px solid var(--bor);box-shadow:var(--shadow-lg);border-radius:14px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;backdrop-filter:blur(8px)">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      <img src="/favicon.svg" alt="AdVerse" style="width:36px;height:36px;border-radius:8px;background:#2D323E;flex-shrink:0" />
+      <div style="min-width:0">
+        <div style="font-weight:800;font-size:13.5px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">AdVerse Agency App</div>
+        <div style="font-size:11.5px;color:var(--txt-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Install on home screen for quick access</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+      <button class="btn btn-primary btn-sm" onclick="triggerPwaInstall()" type="button" style="background:linear-gradient(135deg,#4F46E5,#06B6D4);border:none;font-weight:700;padding:6px 14px;font-size:12px">
+        Install
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="dismissPwaBanner()" type="button" style="padding:6px 8px;border-radius:8px" title="Dismiss">
+        <span class="ms" style="font-size:16px">close</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- PWA Install Guide Modal -->
+  <div class="modal-overlay hidden" id="pwaInstallModalOverlay" onclick="if(event.target===this)closePwaInstallModal()">
+    <div class="modal" style="max-width:480px;width:95%">
+      <div class="modal-header" style="border-bottom:1px solid var(--bor);padding:14px 18px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#4F46E5,#06B6D4);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">install_mobile</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Install App</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Install on mobile or desktop for native app experience</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closePwaInstallModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px">
+        <div style="text-align:center;margin-bottom:16px">
+          <img src="/favicon.svg" alt="AdVerse Agency" style="width:64px;height:64px;border-radius:14px;background:#2D323E;box-shadow:0 4px 12px rgba(0,0,0,0.15);margin:0 auto 10px;display:block" />
+          <h4 style="margin:0;font-size:16px;font-weight:800">AdVerse Agency Suite</h4>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--txt-muted)">Daily Campaign Tracker • Billing & Threshold • Google Sheets Hub</p>
+        </div>
+
+        <div id="pwaInstallPromptContent">
+          <!-- Android / Chrome Direct Install Button -->
+          <div id="pwaDirectInstallWrap" style="margin-bottom:16px">
+            <button class="btn btn-primary" onclick="executeNativeInstall()" type="button" style="width:100%;background:linear-gradient(135deg,#4F46E5,#06B6D4);border:none;font-size:14px;font-weight:800;padding:12px;box-shadow:0 4px 14px rgba(79,70,229,0.35);border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px">
+              <span class="ms" style="font-size:20px">download</span> 1-Click Install
+            </button>
+          </div>
+
+          <!-- Chrome Mobile Manual Instructions -->
+          <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+            <div style="font-size:12px;font-weight:800;color:var(--pri);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:16px">android</span> Android Google Chrome:
+            </div>
+            <ol style="margin:0;padding-left:20px;font-size:12px;line-height:1.7;color:var(--txt)">
+              <li>Tap the top-right <b>Three-Dot (⋮)</b> menu in Chrome.</li>
+              <li>Select <b>"Install app"</b> or <b>"Add to Home screen"</b>.</li>
+              <li>Tap <b>Install</b> to place the app icon on your home screen.</li>
+            </ol>
+          </div>
+
+          <!-- iOS Safari Instructions -->
+          <div style="background:var(--surface-hover);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+            <div style="font-size:12px;font-weight:800;color:#0284C7;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:16px">phone_iphone</span> iPhone / iPad (Safari):
+            </div>
+            <ol style="margin:0;padding-left:20px;font-size:12px;line-height:1.7;color:var(--txt)">
+              <li>In Safari, tap the <b>Share</b> button <span class="ms" style="font-size:13px;vertical-align:middle">ios_share</span> at the bottom.</li>
+              <li>Scroll down and tap <b>"Add to Home Screen"</b> (+).</li>
+              <li>Tap <b>Add</b> in the top-right corner.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:12px 18px">
+        <button class="btn btn-secondary" type="button" onclick="closePwaInstallModal()" style="width:100%">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Entry Vault & Recovery Modal -->
+  <div class="modal-overlay hidden" id="entryRecoveryModal">
+    <div class="modal" style="max-width:760px;width:95%">
+      <div class="modal-header" style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(79,70,229,0.05));border-bottom:1px solid var(--bor)">
+        <div>
+          <h3 style="display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;color:var(--txt)">
+            <span class="ms" style="color:#10B981">verified_user</span>
+            <span>Data Vault & Entry Recovery (ডাটা রিকভারি)</span>
+          </h3>
+          <p style="font-size:12px;color:var(--txt-muted);margin-top:2px">
+            All submitted entries are permanently preserved locally and on the server. You can recover or re-sync any entry with 1 click.
+          </p>
+        </div>
+        <button class="btn-icon" type="button" onclick="closeEntryRecoveryModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:16px 20px">
+        <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="badge" style="background:#10B981;color:#fff;font-weight:800;padding:4px 10px;border-radius:12px" id="vaultCountBadge">0 Saved</span>
+            <span style="font-size:12px;color:var(--txt-muted)">Stored in Local Vault & Server</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" type="button" onclick="reSyncAllVaultEntries()" style="font-weight:700">
+              <span class="ms" style="font-size:15px">cloud_upload</span> Force Sync All to Sheet
+            </button>
+            <button class="btn btn-secondary btn-sm" type="button" onclick="loadVaultEntriesIntoUI()">
+              <span class="ms" style="font-size:15px">refresh</span> Refresh
+            </button>
+          </div>
+        </div>
+        <div id="vaultEntriesList" style="display:flex;flex-direction:column;gap:10px">
+          <div style="text-align:center;padding:24px;color:var(--txt-muted)">Loading saved entries...</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11.5px;color:var(--txt-muted)">
+          <span class="ms" style="font-size:14px;color:#10B981;vertical-align:middle">shield</span> Permanent Storage Protection Active
+        </div>
+        <button class="btn btn-secondary" type="button" onclick="closeEntryRecoveryModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // PWA Lifecycle & Installation Handler
+    let deferredPwaPrompt = null;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      // Prevent standard browser mini-infobar
+      e.preventDefault();
+      deferredPwaPrompt = e;
+      console.log('[AdVerse PWA]: beforeinstallprompt event captured');
+
+      // Show in-app install buttons
+      const btn = document.getElementById('btnPwaInstall');
+      if (btn && !isStandalone) btn.classList.remove('hidden');
+
+      const mobileBanner = document.getElementById('pwaMobileBanner');
+      if (mobileBanner && !isStandalone && !sessionStorage.getItem('adverse_pwa_banner_dismissed')) {
+        mobileBanner.classList.remove('hidden');
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      console.log('[AdVerse PWA]: Application installed successfully');
+      deferredPwaPrompt = null;
+      const btn = document.getElementById('btnPwaInstall');
+      if (btn) btn.classList.add('hidden');
+      const mobileBanner = document.getElementById('pwaMobileBanner');
+      if (mobileBanner) mobileBanner.classList.add('hidden');
+    });
+
+    function triggerPwaInstall() {
+      if (deferredPwaPrompt) {
+        deferredPwaPrompt.prompt();
+        deferredPwaPrompt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === 'accepted') {
+            console.log('[AdVerse PWA]: User accepted the install prompt');
+          }
+          deferredPwaPrompt = null;
+        });
+      } else {
+        openPwaInstallModal();
+      }
+    }
+
+    function executeNativeInstall() {
+      if (deferredPwaPrompt) {
+        deferredPwaPrompt.prompt();
+        deferredPwaPrompt.userChoice.then(() => {
+          deferredPwaPrompt = null;
+          closePwaInstallModal();
+        });
+      } else {
+        const noticeEl = document.getElementById('pwaInstallPromptContent');
+        if (noticeEl) {
+          const banner = document.createElement('div');
+          banner.style.cssText = 'background:#FEF3C7;color:#92400E;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:12px;border:1px solid #FDE68A;display:flex;align-items:center;gap:6px';
+          banner.innerHTML = '<span class="ms" style="font-size:16px;color:#D97706">info</span> Tap Chrome (⋮) menu and select "Install App" or "Add to Home screen".';
+          noticeEl.prepend(banner);
+          setTimeout(() => banner.remove(), 6000);
+        }
+      }
+    }
+
+    function openPwaInstallModal() {
+      const modal = document.getElementById('pwaInstallModalOverlay');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closePwaInstallModal() {
+      const modal = document.getElementById('pwaInstallModalOverlay');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function dismissPwaBanner() {
+      const banner = document.getElementById('pwaMobileBanner');
+      if (banner) banner.classList.add('hidden');
+      sessionStorage.setItem('adverse_pwa_banner_dismissed', '1');
+    }
+
+    // Unregister any active service workers to prevent iframe / deploy asset caching conflicts
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (var i = 0; i < registrations.length; i++) {
+          registrations[i].unregister();
+        }
+      }).catch(function() {});
+    }
+
+    async function convertAllDatesToStandardFormat() {
+      if (!confirm('আপনি কি নিশ্চিত যে সকল তারিখ (Date, Start, End, Entry Date ইত্যাদি) এক ক্লিকে "15-Oct-2026" ফরম্যাটে রূপান্তর করতে চান?')) {
+        return;
+      }
+      try {
+        const res = await cloudRpc('standardizeAllDateFormats', []);
+        if (res && res.success) {
+          showToast(res.message || 'সকল তারিখ সফলভাবে 15-Oct-2026 ফরম্যাটে রূপান্তরিত হয়েছে!', 'success');
+          setTimeout(() => window.location.reload(), 1200);
+        } else {
+          showToast(res?.message || 'তারিখ রূপান্তর করতে ব্যর্থ হয়েছে', 'error');
+        }
+      } catch (e) {
+        showToast('Date format error: ' + (e.message || e), 'error');
+      }
+    }
+    window.convertAllDatesToStandardFormat = convertAllDatesToStandardFormat;
+
+    // If running in standalone mode, hide install button
+    if (isStandalone) {
+      const btn = document.getElementById('btnPwaInstall');
+      if (btn) btn.classList.add('hidden');
+      const banner = document.getElementById('pwaMobileBanner');
+      if (banner) banner.classList.add('hidden');
+    }
+  </script>
+
+  <script type="module" src="/src/zipData.js?v=2.3"></script>
+  <script type="module" src="/src/zipExporter.js?v=2.3"></script>
+  <script type="module" src="/src/app.js?v=2.3"></script>
+</body>
+</html>

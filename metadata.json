@@ -1,0 +1,6 @@
+{
+  "name": "AdVerse Agency",
+  "description": "AdVerse Agency management dashboard for advertising campaigns, ad accounts, payments, and agency calculations with Google Sheets backend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

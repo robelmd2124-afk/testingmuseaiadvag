@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "System administrators with elevated management access",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Admin email address"
+        },
+        "role": {
+          "type": "string",
+          "description": "User administrative role"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with identification and authorization metadata",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User profile photo URL"
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: admin or viewer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Advertising campaign record mirrored from Google Sheets and app",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "Unique UUID for the campaign record",
+          "maxLength": 128
+        },
+        "sl": {
+          "type": "string",
+          "description": "Serial number with month prefix (e.g. 1001)",
+          "maxLength": 32
+        },
+        "adAccount": {
+          "type": "string",
+          "description": "Ad account name",
+          "maxLength": 100
+        },
+        "idName": {
+          "type": "string",
+          "description": "ID or media buyer name",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "description": "Campaign status (Active, Old Page, New Page)",
+          "maxLength": 50
+        },
+        "pageName": {
+          "type": "string",
+          "description": "Facebook or social page name",
+          "maxLength": 150
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Campaign start date"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "Campaign scheduled end date"
+        },
+        "types": {
+          "type": "string",
+          "description": "Campaign ad type (Boost, Message, Lead, etc.)",
+          "maxLength": 50
+        },
+        "day": {
+          "type": "number",
+          "description": "Duration in days"
+        },
+        "budget": {
+          "type": "number",
+          "description": "Total campaign budget in USD"
+        },
+        "dailyBudget": {
+          "type": "number",
+          "description": "Daily budget in USD"
+        },
+        "taka": {
+          "type": "number",
+          "description": "Total in Bangladeshi Taka"
+        },
+        "rate": {
+          "type": "number",
+          "description": "Dollar conversion rate"
+        },
+        "entryDate": {
+          "type": "string",
+          "description": "Date created"
+        },
+        "month": {
+          "type": "string",
+          "description": "Target campaign month",
+          "maxLength": 20
+        },
+        "year": {
+          "type": "string",
+          "description": "Target campaign year",
+          "maxLength": 10
+        },
+        "offUsd": {
+          "type": "string",
+          "description": "Off USD value",
+          "maxLength": 50
+        }
+      },
+      "required": ["recordId", "pageName", "budget", "month", "year"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Client payment and due tracking entry",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "Unique UUID for payment entry",
+          "maxLength": 128
+        },
+        "date": {
+          "type": "string",
+          "description": "Payment date"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Method of payment (Bkash, Nagad, Bank, Cash)",
+          "maxLength": 50
+        },
+        "paid": {
+          "type": "number",
+          "description": "Amount paid in BDT"
+        },
+        "month": {
+          "type": "string",
+          "description": "Applicable month",
+          "maxLength": 20
+        },
+        "year": {
+          "type": "string",
+          "description": "Applicable year",
+          "maxLength": 10
+        },
+        "note": {
+          "type": "string",
+          "description": "Payment note or reference",
+          "maxLength": 255
+        }
+      },
+      "required": ["recordId", "paid", "month", "year"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Global application and sync configuration",
+      "type": "object",
+      "properties": {
+        "sheetId": {
+          "type": "string",
+          "description": "Connected Google Spreadsheet ID",
+          "maxLength": 128
+        },
+        "dollarRate": {
+          "type": "number",
+          "description": "Default conversion exchange rate"
+        },
+        "dateFormat": {
+          "type": "string",
+          "description": "Standard app date format pattern",
+          "maxLength": 30
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of configuration update"
+        }
+      },
+      "required": ["dollarRate"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "#/entities/Admin",
+      "description": "Allowlisted administrators who hold write and administrative privileges"
+    },
+    "/users/{userId}": {
+      "schema": "#/entities/UserProfile",
+      "description": "User profile and authentication documents"
+    },
+    "/campaigns/{campaignId}": {
+      "schema": "#/entities/Campaign",
+      "description": "All agency campaign records across months"
+    },
+    "/payments/{paymentId}": {
+      "schema": "#/entities/Payment",
+      "description": "Client payment logs and records"
+    },
+    "/settings/{settingId}": {
+      "schema": "#/entities/Setting",
+      "description": "Application settings including exchange rates and sync targets"
+    }
+  }
+}

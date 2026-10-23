@@ -1,0 +1,146 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Pillar 4 / Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'robelmd2124@gmail.com'
+      );
+    }
+
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['email', 'role']) &&
+             data.keys().hasOnly(['email', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() > 3 && data.email.size() <= 150 &&
+             data.role is string && data.role.size() <= 50;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['email', 'role']) &&
+             data.keys().hasOnly(['email', 'role', 'displayName', 'photoURL', 'updatedAt']) &&
+             data.email is string && data.email.size() <= 150 &&
+             data.role is string && (data.role == 'admin' || data.role == 'viewer') &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500));
+    }
+
+    function isValidCampaign(data) {
+      return data.keys().hasAll(['recordId', 'pageName', 'budget', 'month', 'year']) &&
+             data.keys().hasOnly([
+               'recordId', 'sl', 'adAccount', 'idName', 'status', 'pageName',
+               'startDate', 'endDate', 'types', 'day', 'budget', 'dailyBudget',
+               'taka', 'rate', 'entryDate', 'month', 'year', 'offUsd', 'updatedAt'
+             ]) &&
+             data.recordId is string && data.recordId.size() > 0 && data.recordId.size() <= 128 &&
+             data.pageName is string && data.pageName.size() > 0 && data.pageName.size() <= 150 &&
+             data.budget is number && data.budget >= 0 &&
+             data.month is string && data.month.size() > 0 && data.month.size() <= 20 &&
+             data.year is string && data.year.size() > 0 && data.year.size() <= 10 &&
+             (!('sl' in data) || (data.sl is string && data.sl.size() <= 32)) &&
+             (!('adAccount' in data) || (data.adAccount is string && data.adAccount.size() <= 100)) &&
+             (!('idName' in data) || (data.idName is string && data.idName.size() <= 100)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('types' in data) || (data.types is string && data.types.size() <= 50)) &&
+             (!('day' in data) || (data.day is number && data.day >= 0)) &&
+             (!('rate' in data) || (data.rate is number && data.rate >= 0)) &&
+             (!('taka' in data) || (data.taka is number && data.taka >= 0));
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['recordId', 'paid', 'month', 'year']) &&
+             data.keys().hasOnly(['recordId', 'date', 'paymentMethod', 'paid', 'month', 'year', 'note', 'updatedAt']) &&
+             data.recordId is string && data.recordId.size() > 0 && data.recordId.size() <= 128 &&
+             data.paid is number && data.paid >= 0 &&
+             data.month is string && data.month.size() <= 20 &&
+             data.year is string && data.year.size() <= 10 &&
+             (!('paymentMethod' in data) || (data.paymentMethod is string && data.paymentMethod.size() <= 50)) &&
+             (!('note' in data) || (data.note is string && data.note.size() <= 255));
+    }
+
+    function isValidSetting(data) {
+      return data.keys().hasAll(['dollarRate']) &&
+             data.keys().hasOnly(['dollarRate', 'sheetId', 'dateFormat', 'updatedAt']) &&
+             data.dollarRate is number && data.dollarRate > 0 &&
+             (!('sheetId' in data) || (data.sheetId is string && data.sheetId.size() <= 128)) &&
+             (!('dateFormat' in data) || (data.dateFormat is string && data.dateFormat.size() <= 30));
+    }
+
+    // 1. Admins Collection
+    match /admins/{adminId} {
+      allow get: if isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming());
+      allow update: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming()) && incoming().email == existing().email;
+      allow delete: if isAdmin() && isValidId(adminId);
+    }
+
+    // 2. User Profiles
+    match /users/{userId} {
+      allow get: if isVerified() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isVerified() && isValidId(userId) && request.auth.uid == userId &&
+                      isValidUserProfile(incoming()) && incoming().role == 'viewer';
+      allow update: if isVerified() && isValidId(userId) &&
+                      isValidUserProfile(incoming()) &&
+                      ((isAdmin()) || (request.auth.uid == userId && incoming().role == existing().role && incoming().email == existing().email));
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // 3. Campaigns Collection
+    match /campaigns/{campaignId} {
+      allow get: if isVerified() && isValidId(campaignId);
+      allow list: if isVerified();
+      allow create: if isVerified() && isValidId(campaignId) && isValidCampaign(incoming());
+      allow update: if isVerified() && isValidId(campaignId) && isValidCampaign(incoming()) &&
+                      incoming().recordId == existing().recordId;
+      allow delete: if isAdmin() && isValidId(campaignId);
+    }
+
+    // 4. Payments Collection
+    match /payments/{paymentId} {
+      allow get: if isVerified() && isValidId(paymentId);
+      allow list: if isVerified();
+      allow create: if isVerified() && isValidId(paymentId) && isValidPayment(incoming());
+      allow update: if isVerified() && isValidId(paymentId) && isValidPayment(incoming()) &&
+                      incoming().recordId == existing().recordId;
+      allow delete: if isAdmin() && isValidId(paymentId);
+    }
+
+    // 5. Settings Collection
+    match /settings/{settingId} {
+      allow get: if isVerified() && isValidId(settingId);
+      allow list: if isVerified();
+      allow create: if isAdmin() && isValidId(settingId) && isValidSetting(incoming());
+      allow update: if isAdmin() && isValidId(settingId) && isValidSetting(incoming());
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+  }
+}
