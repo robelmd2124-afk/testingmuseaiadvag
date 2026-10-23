@@ -4274,7 +4274,7 @@ function renderRecordsTable(data) {
 
   if (thead) {
     let thHtml = '';
-    if (isCheckableTab) {
+    if (isCheckableTab && isAdmin()) {
       thHtml += `<th class="th-check" style="width:46px;min-width:46px;text-align:center;padding:8px 4px" title="Check / Uncheck All">
         <input type="checkbox" id="masterTodayCheckbox" onchange="toggleAllTodayVerified(this.checked)" style="cursor:pointer;width:18px;height:18px;accent-color:#10b981;border-radius:4px;vertical-align:middle" ${allVerified ? 'checked' : ''} />
       </th>`;
@@ -4542,7 +4542,7 @@ function renderRecordsTable(data) {
       const isFocused = state.focusedRowIndex === rIdx;
       return `
         <tr class="table-record-row ${isNewlyAddedRow ? 'table-row-fade-in' : ''} ${isFocused ? 'row-focused' : ''} ${isVer ? 'row-verified' : ''}" id="tableRecordRow-${rIdx}" data-row-idx="${rIdx}" ${isFocused ? 'aria-selected="true"' : ''} onclick="handleTableRowClick(event, ${rIdx})">
-          ${(isTodayCreated || isCampaignView) ? `
+          ${((isTodayCreated || isCampaignView) && isAdmin()) ? `
             <td class="td-check" style="text-align:center;width:46px;min-width:46px;padding:6px 4px" onclick="event.stopPropagation();">
               <input type="checkbox" class="row-campaign-check" onchange="window.toggleRowVerification(${rIdx}, this.checked)" ${isVer ? 'checked' : ''} style="cursor:pointer;width:18px;height:18px;accent-color:#10b981;border-radius:4px;vertical-align:middle" title="${isVer ? 'Checked (Click to untick)' : 'Unchecked (Click to tick)'}" />
             </td>
