@@ -231,87 +231,6 @@ const memoryStore: MemoryStore = {
 let isProcessingServerSyncQueue = false;
 let serverSyncQueueTimeout: NodeJS.Timeout | null = null;
 
-function loadOctoberRows(): any[] {
-  try {
-    const possibleOctPaths = [
-      path.join(process.cwd(), 'user_oct.tsv'),
-      path.join(process.cwd(), 'app', 'applet', 'user_oct_new.tsv'),
-      path.join(process.cwd(), 'user_oct_new.tsv'),
-      '/tmp/user_oct.tsv',
-      path.join(process.cwd(), 'applet', 'user_oct.tsv'),
-      '/app/applet/user_oct.tsv',
-      '/user_oct.tsv',
-      path.resolve('user_oct.tsv')
-    ];
-    const userOctPath = possibleOctPaths.find(p => fs.existsSync(p));
-    if (!userOctPath) return [];
-    const rawOctLines = fs.readFileSync(userOctPath, 'utf8').trim().split('\n');
-    if (rawOctLines.length === 0) return [];
-    const rows = rawOctLines.map(line => {
-      const p = line.split('\t');
-      const sl = p[0]?.trim();
-      const offUsd = p[1]?.trim() || '';
-      const adAccount = p[2]?.trim() || '';
-      const idName = p[3]?.trim() || '';
-      const status = p[4]?.trim() || '';
-      const pageName = p[5]?.trim() || '';
-      const rawStart = p[6]?.trim() || '';
-      const rawEnd = p[7]?.trim() || '';
-      const types = p[8]?.trim() || 'Boost';
-      const day = parseInt(p[9]?.trim() || '0', 10) || 0;
-      const budget = parseFloat(p[10]?.trim() || '0') || 0;
-      const daily = p[11]?.trim() || '';
-      const taka = parseFloat(p[12]?.trim() || '0') || 0;
-      const rate = parseFloat(p[13]?.trim() || '140') || 140;
-      const rawEntry = p[14]?.trim() || '';
-      const month = p[15]?.trim() || 'October';
-      const year = p[16]?.trim() || '2026';
-      const recordId = p[17]?.trim() || '';
-
-      const start = formatCustomDate(rawStart, month) || rawStart;
-      const end = formatCustomDate(rawEnd, month) || rawEnd;
-      const entryDate = formatCustomDate(rawEntry, month) || rawEntry;
-
-      return {
-        SL: sl,
-        'OFF $': offUsd,
-        'OFF USD': offUsd,
-        'AD Account': adAccount,
-        'ID Name': idName,
-        Status: status,
-        'Page Name': pageName,
-        Start: start,
-        End: end,
-        Types: types,
-        Day: day,
-        Budget: budget,
-        'Daily $': daily,
-        Taka: taka.toFixed(2),
-        Rate: rate,
-        'Entry Date': entryDate,
-        Month: month,
-        Year: year,
-        'Record ID': recordId
-      };
-    });
-
-    // Populate memoryStore.adAccounts and memoryStore.pages
-    rows.forEach(r => {
-      if (r['AD Account'] && !isDemoAdAccount(r['AD Account']) && !memoryStore.adAccounts.some(a => a.a.toLowerCase() === r['AD Account'].toLowerCase())) {
-        memoryStore.adAccounts.push({ a: r['AD Account'], id: r['ID Name'] || '' });
-      }
-      if (r['Page Name'] && !isDemoPage(r['Page Name']) && !memoryStore.pages.some(p => p.toLowerCase() === r['Page Name'].toLowerCase())) {
-        memoryStore.pages.push(r['Page Name']);
-      }
-    });
-
-    return rows;
-  } catch (err) {
-    console.error('[AdVerse Store]: Error in loadOctoberRows:', err);
-    return [];
-  }
-}
-
 const BACKUP_STORE_PATH = path.join(process.cwd(), '.data_store.json.bak');
 const TEMP_STORE_PATH = path.join(process.cwd(), '.data_store.json.tmp');
 
@@ -365,6 +284,19 @@ function loadStoreFromDisk(): boolean {
         SHEET_ID = '';
       }
       process.env.GOOGLE_SHEET_ID = SHEET_ID;
+
+      // One source of truth: a disk store written for a DIFFERENT sheet must
+      // never serve its data under the currently connected sheet. Drop its
+      // data collections (settings/users are app-level and safe to keep);
+      // the startup sync rebuilds everything from the connected sheet.
+      const storeSheetId = typeof parsed.SHEET_ID === 'string' ? parsed.SHEET_ID.trim() : '';
+      if (storeSheetId && SHEET_ID && storeSheetId !== SHEET_ID && parsed.memoryStore) {
+        console.warn('[AdVerse Store]: Disk store belongs to a different sheet — ignoring its data collections; they will be rebuilt from the connected sheet.');
+        parsed.memoryStore = {
+          settings: parsed.memoryStore.settings || {},
+          users: parsed.memoryStore.users || []
+        } as MemoryStore;
+      }
 
       if (parsed.memoryStore) {
         Object.assign(memoryStore, parsed.memoryStore);
@@ -523,18 +455,10 @@ function loadStoreFromDisk(): boolean {
         remappedCampaigns[k] = sanitizeCampaignRows(cList);
       }
 
-      // 2. Only seed from user_oct.tsv if database has NO October rows at all
-      try {
-        const existingOct = Array.isArray(remappedCampaigns['Campaign_October_2026']) ? remappedCampaigns['Campaign_October_2026'] : [];
-        if (!existingOct || existingOct.length === 0) {
-          const octRows = loadOctoberRows();
-          if (octRows && octRows.length > 0) {
-            remappedCampaigns['Campaign_October_2026'] = octRows;
-          }
-        }
-      } catch (err) {
-        console.error('[AdVerse Store]: Error loading user_oct.tsv:', err);
-      }
+      // 2. NO hardcoded seeding — ever. The connected Google Sheet is the only
+      // source of data; an empty month simply stays empty until the sync fills
+      // it from that sheet. (A legacy user_oct.tsv seed used to resurrect a
+      // previous sheet's October data whenever the store was momentarily empty.)
 
       // 3. Remove non-campaign summary buckets
       delete remappedCampaigns['Page_Summary'];
@@ -598,24 +522,14 @@ function seedInitialMemoryStore() {
   memoryStore.scams = [];
   memoryStore.agencyCosts = [];
   memoryStore.monthlyClosing = [];
-
-  const octRows = loadOctoberRows();
-  if (octRows.length > 0) {
-    memoryStore.campaigns['Campaign_October_2026'] = octRows;
-  }
+  // No hardcoded data: the store starts empty and is filled only by syncing
+  // the connected Google Sheet.
 }
 
 if (!loadStoreFromDisk()) {
   seedInitialMemoryStore();
   saveStoreToDisk();
 } else {
-  // If October 2026 campaigns are empty or missing, load from user_oct.tsv
-  if (!Array.isArray(memoryStore.campaigns['Campaign_October_2026']) || memoryStore.campaigns['Campaign_October_2026'].length === 0) {
-    const octRows = loadOctoberRows();
-    if (octRows.length > 0) {
-      memoryStore.campaigns['Campaign_October_2026'] = octRows;
-    }
-  }
   saveStoreToDisk();
 }
 
@@ -3230,9 +3144,9 @@ async function campaignRows(month?: string, year?: string | number): Promise<any
             ingestSheetRows(exactKey, fetched.headers, fetched.rows);
           }
         } catch (_) {}
-      } else if (exactKey === 'Campaign_October_2026') {
-        memoryStore.campaigns[exactKey] = loadOctoberRows();
       }
+      // No sheet connected → the month stays empty. Never substitute
+      // hardcoded data for the connected sheet's data.
     }
 
     // Return the exact rows of the month sheet directly
@@ -3865,14 +3779,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       const allCampaigns: any[] = [];
       const seenIds = new Set<string>();
 
-      // Ensure current month rows are loaded in memoryStore.campaigns if offline/standalone
-      const curOctKey = `Campaign_${currentMn}_${currentYr}`;
-      if (!Array.isArray(memoryStore.campaigns[curOctKey]) || memoryStore.campaigns[curOctKey].length === 0) {
-        if (!SHEET_ID) {
-          memoryStore.campaigns[curOctKey] = loadOctoberRows();
-        }
-      }
-
       Object.values(memoryStore.campaigns || {}).forEach(sheetRows => {
         if (Array.isArray(sheetRows)) {
           sheetRows.forEach(row => {
@@ -4478,14 +4384,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       if (k === 'end_ads') {
         const today = getNowBST();
         const tomorrow = new Date(today.getTime() + 86400000);
-
-        // Ensure October 2026 rows are loaded
-        const curMn = MONTHS[today.getMonth()];
-        const curYr = today.getFullYear();
-        const curOctKey = `Campaign_${curMn}_${curYr}`;
-        if (!Array.isArray(memoryStore.campaigns[curOctKey]) || memoryStore.campaigns[curOctKey].length === 0) {
-          memoryStore.campaigns[curOctKey] = loadOctoberRows();
-        }
 
         const allList: any[] = [];
         const seen = new Set<string>();

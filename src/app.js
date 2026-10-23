@@ -680,6 +680,9 @@ function performSaveSnapshot() {
         }
       }
     }
+    if (state.sheetId) {
+      try { localStorage.setItem('adverse_data_sheet_id', state.sheetId); } catch (_) {}
+    }
     const snapshot = {
       menus: getStandardMenus(),
       months: state.months,
@@ -2566,6 +2569,29 @@ function loadAppData(retryCount = 0) {
     populateAgencyCalcFilters();
 
     if (data.sheetId) {
+      // One source of truth: every persisted cache/registry in this browser
+      // belongs to ONE sheet. If the connected sheet changed (or the stored
+      // data predates sheet tagging), purge it all so another sheet's data
+      // can never render — the server repopulates everything from the
+      // connected sheet right after this.
+      try {
+        const dataTag = localStorage.getItem('adverse_data_sheet_id') || '';
+        if (dataTag !== data.sheetId) {
+          const hadPersisted = !!(dataTag || localStorage.getItem(SNAPSHOT_STORAGE_KEY) || localStorage.getItem('adverse_master_campaigns_v2') || localStorage.getItem('adverse_today_created_v2'));
+          if (hadPersisted) {
+            ['campaign', 'today_created_campaign', 'end_ads', 'page_summery', 'payment_due_tracker', 'agency_spending'].forEach(m => { try { localStorage.removeItem(`adverse_cache_${m}`); } catch (_) {} });
+            localStorage.removeItem('adverse_master_campaigns_v2');
+            localStorage.removeItem('adverse_today_created_v2');
+            localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+            localStorage.removeItem('adverse_app_snapshot_v2');
+            state.clientCache = {};
+            state.masterCampaignRegistry = [];
+            state.campaignRegistry = [];
+            state.todayCreatedRegistry = [];
+          }
+          localStorage.setItem('adverse_data_sheet_id', data.sheetId);
+        }
+      } catch (_) {}
       state.sheetId = data.sheetId;
       if (data.webhookUrl) state.webhookUrl = data.webhookUrl;
       try {
