@@ -2444,6 +2444,17 @@ function initializeApp() {
   const foundMenu = state.menus.find(m => m.key === defaultMenu) || state.menus[0];
   state.currentMenu = foundMenu;
 
+  // Explicit logout wins over every auto-login path (?pin= link, saved/default PIN):
+  // after a logout the PIN screen must appear and stay until a manual PIN login.
+  const isExplicitLogoutEarly = (() => {
+    try { return localStorage.getItem('adverse_logged_out') === 'true'; } catch (_) { return false; }
+  })();
+  if (isExplicitLogoutEarly) {
+    state.userRole = 'unauthorized';
+    showPinLogin('Logged out successfully. Please enter PIN to access.');
+    return;
+  }
+
   const urlPin = checkUrlParamsForLogin();
   let savedPin = localStorage.getItem('adverse_saved_pin');
   let savedRole = localStorage.getItem('adverse_user_role');
@@ -2520,7 +2531,7 @@ function loadAppData(retryCount = 0) {
     state.rate = data.rate || 140;
 
     let savedPin = (localStorage.getItem('adverse_saved_pin') || '').trim();
-    if (!savedPin) {
+    if (!savedPin && localStorage.getItem('adverse_logged_out') !== 'true') {
       savedPin = '01726912624';
       localStorage.setItem('adverse_saved_pin', '01726912624');
       localStorage.setItem('adverse_user_role', 'admin');
@@ -4263,7 +4274,7 @@ function renderRecordsTable(data) {
 
   if (thead) {
     let thHtml = '';
-    if (isCheckableTab) {
+    if (isCheckableTab && isAdmin()) {
       thHtml += `<th class="th-check" style="width:46px;min-width:46px;text-align:center;padding:8px 4px" title="Check / Uncheck All">
         <input type="checkbox" id="masterTodayCheckbox" onchange="toggleAllTodayVerified(this.checked)" style="cursor:pointer;width:18px;height:18px;accent-color:#10b981;border-radius:4px;vertical-align:middle" ${allVerified ? 'checked' : ''} />
       </th>`;
@@ -4531,7 +4542,7 @@ function renderRecordsTable(data) {
       const isFocused = state.focusedRowIndex === rIdx;
       return `
         <tr class="table-record-row ${isNewlyAddedRow ? 'table-row-fade-in' : ''} ${isFocused ? 'row-focused' : ''} ${isVer ? 'row-verified' : ''}" id="tableRecordRow-${rIdx}" data-row-idx="${rIdx}" ${isFocused ? 'aria-selected="true"' : ''} onclick="handleTableRowClick(event, ${rIdx})">
-          ${(isTodayCreated || isCampaignView) ? `
+          ${((isTodayCreated || isCampaignView) && isAdmin()) ? `
             <td class="td-check" style="text-align:center;width:46px;min-width:46px;padding:6px 4px" onclick="event.stopPropagation();">
               <input type="checkbox" class="row-campaign-check" onchange="window.toggleRowVerification(${rIdx}, this.checked)" ${isVer ? 'checked' : ''} style="cursor:pointer;width:18px;height:18px;accent-color:#10b981;border-radius:4px;vertical-align:middle" title="${isVer ? 'Checked (Click to untick)' : 'Unchecked (Click to tick)'}" />
             </td>
