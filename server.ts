@@ -108,9 +108,12 @@ const PORT = getListenPort();
 
 const CONFIG_FILE_PATH = path.join(process.cwd(), '.sheet_config.json');
 
-export const MASTER_HARDCODED_SHEET_ID = '1FtDhq2KEKN-WpUnGsZe61IgXxhL-cW3i3a4Xc62pn4A';
-export const MASTER_APPS_SCRIPT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwdy43n8p0MxnJ7i_vMwCN_hOYXoTfTaV6ynMU65D7SZChOIoU_TQ-fW0UpozyCyClIlQ/exec';
-
+// SINGLE SOURCE OF TRUTH for the Google Sheet connection: the persisted
+// .sheet_config.json file (written by saveSheetConfigToDisk via the
+// updateSheetConfig / sync / disconnect RPCs, edited from the app's
+// Tools & Settings -> Sheet & Apps Script Sync hub). No Sheet ID or
+// Apps Script URL is hardcoded in code; when the config file holds no
+// values the app runs in a graceful "not configured" state.
 function getActiveSheetConfig(): { sheetId: string; webhookUrl: string } {
   try {
     if (fs.existsSync(CONFIG_FILE_PATH)) {
@@ -121,15 +124,15 @@ function getActiveSheetConfig(): { sheetId: string; webhookUrl: string } {
       if (cfg && cfg.sheetId) {
         return {
           sheetId: String(cfg.sheetId).trim(),
-          webhookUrl: String(cfg.webhookUrl || MASTER_APPS_SCRIPT_WEBHOOK_URL).trim()
+          webhookUrl: String(cfg.webhookUrl || '').trim()
         };
       }
+      // Config file exists but holds no sheet: it is authoritative —
+      // the connection was cleared/disconnected from Settings.
+      return { sheetId: '', webhookUrl: '' };
     }
   } catch (_) {}
-  return {
-    sheetId: process.env.GOOGLE_SHEET_ID || MASTER_HARDCODED_SHEET_ID,
-    webhookUrl: process.env.APPS_SCRIPT_WEBHOOK_URL || MASTER_APPS_SCRIPT_WEBHOOK_URL
-  };
+  return { sheetId: '', webhookUrl: '' };
 }
 
 function saveSheetConfigToDisk(sheetId: string, webhookUrl: string) {
@@ -345,12 +348,19 @@ function loadStoreFromDisk(): boolean {
     if (content && content.trim()) {
       const parsed = JSON.parse(content);
       const activeCfg = getActiveSheetConfig();
+      // .sheet_config.json is the single source of truth: when the file
+      // exists its values (including an intentionally cleared/disconnected
+      // state) win. The data-store copies below are only a legacy fallback
+      // for installs that predate the config file.
+      const configFileAuthoritative = fs.existsSync(CONFIG_FILE_PATH);
       if (activeCfg.sheetId) {
         SHEET_ID = activeCfg.sheetId;
-      } else if (typeof parsed.SHEET_ID === 'string' && parsed.SHEET_ID) {
+      } else if (!configFileAuthoritative && typeof parsed.SHEET_ID === 'string' && parsed.SHEET_ID) {
         SHEET_ID = parsed.SHEET_ID;
-      } else if (process.env.GOOGLE_SHEET_ID) {
+      } else if (!configFileAuthoritative && process.env.GOOGLE_SHEET_ID) {
         SHEET_ID = process.env.GOOGLE_SHEET_ID;
+      } else if (configFileAuthoritative) {
+        SHEET_ID = '';
       }
       process.env.GOOGLE_SHEET_ID = SHEET_ID;
 
@@ -358,13 +368,19 @@ function loadStoreFromDisk(): boolean {
         Object.assign(memoryStore, parsed.memoryStore);
         if (activeCfg.sheetId) {
           SHEET_ID = activeCfg.sheetId;
-        } else if (parsed.memoryStore.settings?.sheet_id) {
+        } else if (!configFileAuthoritative && parsed.memoryStore.settings?.sheet_id) {
           SHEET_ID = parsed.memoryStore.settings.sheet_id;
+        } else if (configFileAuthoritative) {
+          SHEET_ID = activeCfg.sheetId;
         }
         if (!memoryStore.settings) memoryStore.settings = {};
         memoryStore.settings.sheet_id = SHEET_ID;
         if (activeCfg.webhookUrl) {
           memoryStore.settings.webhook_url = activeCfg.webhookUrl;
+        } else if (configFileAuthoritative) {
+          // Config file is authoritative: a cleared webhook must not be
+          // resurrected from the data-store mirror.
+          delete (memoryStore.settings as any).webhook_url;
         }
 
         // 1. Ensure all payments have Month and Year strictly matched to their real Date
@@ -906,7 +922,7 @@ let lastSheetAccessStatus = 200;
 // Reads all tabs from the user's deployed Apps Script web app (action=readAll).
 // Returns null if the script is not deployed / is the old version without the read action.
 async function fetchAllSheetsViaAppsScript(): Promise<{ [title: string]: any[][] } | null> {
-  const webhookUrl = String(memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL || MASTER_APPS_SCRIPT_WEBHOOK_URL || '').trim();
+  const webhookUrl = String(memoryStore.settings.webhook_url || '').trim();
   if (!webhookUrl) return null;
   const sep = webhookUrl.includes('?') ? '&' : '?';
   const attempts: Array<() => Promise<Response>> = [
@@ -1909,13 +1925,14 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
 }
 
 async function syncWebhookDirect(action: string, payload: any): Promise<boolean> {
-  const configuredUrl = memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL;
-  // Candidate endpoints, in order: the configured webhook first, then the permanent
-  // MASTER connector (same fallback chain fetchAllSheetsViaAppsScript already uses).
-  // A configured deployment that has been deleted/replaced returns Google's
-  // "Page Not Found" (404) or a JSON {success:false} — in that case writes must fall
-  // back to the MASTER connector instead of being silently lost.
-  const candidates = [configuredUrl, MASTER_APPS_SCRIPT_WEBHOOK_URL].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
+  const configuredUrl = memoryStore.settings.webhook_url;
+  // The only write endpoint is the Apps Script URL saved in the persisted
+  // config (.sheet_config.json, mirrored into settings.webhook_url and
+  // editable in Tools & Settings). A configured deployment that has been
+  // deleted/replaced returns Google's "Page Not Found" (404) or a JSON
+  // {success:false} — those are treated as failures below so the write is
+  // queued for retry and surfaced to the user, never silently lost.
+  const candidates = [configuredUrl].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
   if (candidates.length === 0) return false;
 
   // Protocol compatibility: the repo's exported connectors read the row values from
@@ -6312,19 +6329,20 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     }
     case 'updateSheetConfig': {
       const [newSheetId, newWebhookUrl] = args;
-      const cleanNewId = extractSpreadsheetId(String(newSheetId || '').trim());
-      const cleanNewWebhook = String(newWebhookUrl || '').trim();
+      const cleanNewId = extractSpreadsheetId(String(newSheetId ?? '').trim());
+      const cleanNewWebhook = String(newWebhookUrl ?? '').trim();
 
-      const sheetChanged = cleanNewId && cleanNewId !== SHEET_ID;
-      if (cleanNewId) {
-        SHEET_ID = cleanNewId;
-        process.env.GOOGLE_SHEET_ID = SHEET_ID;
-        memoryStore.settings.sheet_id = SHEET_ID;
-      }
-      if (cleanNewWebhook) {
-        memoryStore.settings.webhook_url = cleanNewWebhook;
-      }
-      saveSheetConfigToDisk(SHEET_ID, memoryStore.settings.webhook_url);
+      // The values submitted from Tools & Settings are authoritative and
+      // take effect immediately (no restart): they replace the persisted
+      // config in .sheet_config.json and the runtime mirror. An emptied
+      // field clears that value — an empty Sheet ID leaves the app in the
+      // graceful "not configured" state until a new sheet is saved.
+      const sheetChanged = cleanNewId !== SHEET_ID;
+      SHEET_ID = cleanNewId;
+      process.env.GOOGLE_SHEET_ID = SHEET_ID;
+      memoryStore.settings.sheet_id = SHEET_ID;
+      memoryStore.settings.webhook_url = cleanNewWebhook;
+      saveSheetConfigToDisk(SHEET_ID, cleanNewWebhook);
 
       if (sheetChanged) {
         // Purge previous sheet data from cache so it doesn't mix with new sheet!
@@ -6656,7 +6674,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       saveStoreToDisk();
 
       // Automatically push to Google Sheet via Webhook
-      const targetUrl = memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL;
+      const targetUrl = memoryStore.settings.webhook_url;
       let webhookStatus = 'No webhook URL configured';
       if (targetUrl) {
         try {
@@ -6708,7 +6726,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     case 'pushAllDataToSheetViaWebhook': {
       requireAdmin(req);
       const [customWebhookUrl] = args;
-      const targetUrl = customWebhookUrl || memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL;
+      const targetUrl = customWebhookUrl || memoryStore.settings.webhook_url;
       if (!targetUrl) {
         return { success: false, message: 'Apps Script Webhook URL not found. Please provide or save your Webhook URL.' };
       }
