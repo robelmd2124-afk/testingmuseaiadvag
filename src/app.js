@@ -359,6 +359,11 @@ async function executeSingleRpc(method, args) {
         showPinLogin('Session expired. Please enter your PIN.');
         throw new Error('LOGIN_REQUIRED');
       }
+      // Honest sheet-sync surfacing: the server flags responses whose Google Sheet
+      // write-through failed (entry is kept in-app and queued for automatic retry).
+      if (data && data.result && data.result.sheetSynced === false && data.result.sheetWarning) {
+        try { showToast('⚠️ ' + data.result.sheetWarning, 'error'); } catch (_) {}
+      }
       return (data && data.result !== undefined) ? data.result : (data ?? getGracefulRpcFallback(method, args));
     } catch (err) {
       if (err.message === 'LOGIN_REQUIRED') throw err;
@@ -578,8 +583,7 @@ const CANONICAL_MENUS = [
   { key: 'campaign', label: 'All Campaign', custom: 4 },
   { key: 'page_summery', label: 'Page Summary', custom: 3 },
   { key: 'payment_due_tracker', label: 'Payment', custom: 2 },
-  { key: 'agency_spending', label: 'Agency Calculation', custom: 5 },
-  { key: 'ad_account_billing', label: 'Ad Account Billing', custom: 10, adminOnly: true }
+  { key: 'agency_spending', label: 'Agency Calculation', custom: 5 }
 ];
 
 function getStandardMenus() {
@@ -2616,6 +2620,15 @@ function loadAppData(retryCount = 0) {
       state.cacheTimestamps = state.cacheTimestamps || {};
       const nowTs = Date.now();
       for (const [k, val] of Object.entries(data.preloaded)) {
+        // Last-known-good guard: never overwrite non-empty cached data with an empty
+        // preload (e.g. while the server is still running its startup sync) — this was
+        // a root cause of the intermittent "0 data" display.
+        const incomingRows = val && val.records && Array.isArray(val.records.rows) ? val.records.rows.length : null;
+        if (incomingRows === 0) {
+          const existing = state.clientCache[`${k}_${mn}_${yr}___`] || state.clientCache[`${k}_${mn}_${yr}`];
+          const existingRows = existing && existing.records && Array.isArray(existing.records.rows) ? existing.records.rows.length : 0;
+          if (existingRows > 0) continue;
+        }
         state.clientCache[`${k}_${mn}_${yr}___`] = val;
         state.clientCache[`${k}_${mn}_${yr}__`] = val;
         state.clientCache[`${k}_${mn}_${yr}`] = val;
@@ -2624,10 +2637,14 @@ function loadAppData(retryCount = 0) {
         state.cacheTimestamps[`${k}_${mn}_${yr}`] = nowTs;
       }
       if (data.preloaded.campaign && data.preloaded.campaign.records && Array.isArray(data.preloaded.campaign.records.rows)) {
-        state.campaignRegistry = data.preloaded.campaign.records.rows;
+        if (data.preloaded.campaign.records.rows.length > 0 || !(state.campaignRegistry || []).length) {
+          state.campaignRegistry = data.preloaded.campaign.records.rows;
+        }
       }
       if (data.preloaded.today_created_campaign && data.preloaded.today_created_campaign.records && Array.isArray(data.preloaded.today_created_campaign.records.rows)) {
-        state.todayCreatedRegistry = data.preloaded.today_created_campaign.records.rows;
+        if (data.preloaded.today_created_campaign.records.rows.length > 0 || !(state.todayCreatedRegistry || []).length) {
+          state.todayCreatedRegistry = data.preloaded.today_created_campaign.records.rows;
+        }
       }
       if (data.preloaded.agency_spending && data.preloaded.agency_spending.stats) {
         updateFinancialHud(data.preloaded.agency_spending.stats);
@@ -2858,8 +2875,6 @@ function renderTopNav() {
         extraBadges = '<span class="nav-live-pulse-dot" title="Live Today Monitoring"></span>';
       } else if (m.key === 'end_ads') {
         extraBadges = '<span class="nav-badge-pill end-ads-badge" id="endAdsNavBadge" style="display:none">0</span>';
-      } else if (m.key === 'ad_account_billing') {
-        extraBadges = '<span class="nav-admin-tag">ADMIN</span>';
       }
 
       b.innerHTML = `
@@ -3085,14 +3100,7 @@ function populateAgencyCalcFilters() {
 }
 
 function selectMenu(key) {
-  if (key === 'design_studio' || key === 'auto_creative' || key === 'new_pages' || key === 'pause_ads' || key === 'scam') {
-    selectMenu('today_created_campaign');
-    return;
-  }
-
-  const restrictedKeys = ['ad_account_billing'];
-  if (restrictedKeys.includes(key) && !isAdmin()) {
-    showToast('⚠️ Admin Access Only', 'error');
+  if (key === 'design_studio' || key === 'auto_creative' || key === 'new_pages' || key === 'pause_ads' || key === 'scam' || key === 'ad_account_billing') {
     selectMenu('today_created_campaign');
     return;
   }
@@ -12543,7 +12551,6 @@ const cmdPaletteItems = [
   { title: 'Page Summary & ROI', icon: 'analytics', action: () => selectMenu('page_summery') },
   { title: 'Payment', icon: 'account_balance_wallet', action: () => selectMenu('payment_due_tracker') },
   { title: 'Agency Calculation', icon: 'payments', action: () => selectMenu('agency_spending') },
-  { title: 'Ad Account Billing & Thresholds (Admin Only)', icon: 'credit_card', adminOnly: true, action: () => selectMenu('ad_account_billing') },
   { title: 'Open Visual Analytics & Intelligence', icon: 'analytics', action: openAnalyticsModal },
   { title: 'WhatsApp Client Notice Generator', icon: 'chat', action: () => openWhatsAppModal() },
   { title: 'Google Sheet Sync & Import Hub', icon: 'table_chart', action: openSheetConfigModal },

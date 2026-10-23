@@ -61,11 +61,27 @@ app.get('/sw.js', (req, res) => {
   res.status(404).end();
 });
 
-// Ensure scripts are always served fresh without stale browser caching
-app.get(['/src/app.js', '/src/zipData.js', '/src/zipExporter.js'], (req, res, next) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+// Static asset caching for /src/* (performance: repeat loads were re-downloading
+// multi-MB scripts on every visit because everything was forced no-store):
+// - URLs carrying a ?v= version parameter are content-versioned by the app itself
+//   (index.html loads /src/app.js?v=2.3 etc.), so they can be cached immutably —
+//   a code update bumps the version and produces a new URL.
+// - The three entry scripts WITHOUT a version parameter keep the previous
+//   always-fresh behavior, exactly as before.
+// - Other /src assets (CSS etc.) get a 1-hour cache with ETag revalidation.
+app.use('/src', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  const hasVersion = typeof req.query.v === 'string' && req.query.v.length > 0;
+  const isEntryScript = ['/app.js', '/zipData.js', '/zipExporter.js'].includes(req.path);
+  if (hasVersion) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (isEntryScript) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  }
   next();
 });
 
@@ -633,6 +649,10 @@ function handleSheetsApiError(err: any, context?: string) {
 }
 
 let currentRequestOAuthToken: string | null = null;
+// Set by appendRow/updateRowAt/deleteRowAt when the synchronous sheet write-through
+// fails; the /api/rpc dispatcher merges it into the response so a failed sheet save
+// is surfaced honestly (and the write stays queued for automatic retry).
+let currentRequestSheetSyncFailure: string | null = null;
 
 async function getSheetsClient(customToken?: string | null): Promise<sheets_v4.Sheets | null> {
   if (!SHEET_ID) return null;
@@ -1248,7 +1268,20 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
       const rowYear = c['Year'] || c['year'] || String(new Date().getFullYear());
       return normalizeCampaign(c, rowMonth, rowYear, sl);
     });
-    memoryStore.todayCreated = normalizedRows;
+    // Never wipe known today rows with an empty/failed ingest (prevents intermittent "0 data"):
+    // only replace when the sheet actually returned rows; otherwise merge sheet rows over local ones.
+    if (normalizedRows.length > 0) {
+      if (memoryStore.todayCreated.length === 0) {
+        memoryStore.todayCreated = normalizedRows;
+      } else {
+        const mergedToday = [...memoryStore.todayCreated];
+        normalizedRows.forEach(nr => {
+          const idx = mergedToday.findIndex(x => (nr['Record ID'] && x['Record ID'] === nr['Record ID']) || (String(x['SL']) === String(nr['SL']) && String(x['Page Name'] || '').trim().toLowerCase() === String(nr['Page Name'] || '').trim().toLowerCase()));
+          if (idx >= 0) mergedToday[idx] = nr; else mergedToday.push(nr);
+        });
+        memoryStore.todayCreated = mergedToday;
+      }
+    }
     return;
   }
 
@@ -1876,28 +1909,59 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
 }
 
 async function syncWebhookDirect(action: string, payload: any): Promise<boolean> {
-  const webhookUrl = memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL;
-  if (!webhookUrl) return false;
+  const configuredUrl = memoryStore.settings.webhook_url || process.env.APPS_SCRIPT_WEBHOOK_URL;
+  // Candidate endpoints, in order: the configured webhook first, then the permanent
+  // MASTER connector (same fallback chain fetchAllSheetsViaAppsScript already uses).
+  // A configured deployment that has been deleted/replaced returns Google's
+  // "Page Not Found" (404) or a JSON {success:false} — in that case writes must fall
+  // back to the MASTER connector instead of being silently lost.
+  const candidates = [configuredUrl, MASTER_APPS_SCRIPT_WEBHOOK_URL].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
+  if (candidates.length === 0) return false;
 
-  try {
-    const bodyToSend = action === 'batch'
-      ? { action: 'batch', batch: payload.batch || [] }
-      : { action, ...payload };
+  // Protocol compatibility: the repo's exported connectors read the row values from
+  // `rowValues`, but the deployed Sync Connector v2.0 reads them from `row` (verified
+  // live: with only rowValues it fails with "The rowContents passed to appendRow()
+  // must be nonempty"). Send BOTH fields with the same array so writes work against
+  // either connector generation. Likewise, v2.0's updateRow/deleteRow require a
+  // `rowIndex` field (they reject requests without one: "Invalid rowIndex for
+  // updateRow/deleteRow") while the exported connectors match by Record ID and
+  // ignore it — mirror the tracked rowNo into rowIndex when present.
+  const withRowAlias = (p: any) => {
+    if (!p) return p;
+    let out = p;
+    if (Array.isArray(p.rowValues) && p.row === undefined) out = { ...out, row: p.rowValues };
+    if (typeof p.rowNo === 'number' && p.rowNo > 1 && p.rowIndex === undefined) out = { ...out, rowIndex: p.rowNo };
+    return out;
+  };
 
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bodyToSend),
-      redirect: 'follow',
-      signal: AbortSignal.timeout(12000)
-    });
-    const text = await res.text();
-    console.log(`[Instant Sheet Sync] ${action} (${payload.sheetName || (payload.batch?.length ? payload.batch.length + ' items' : '')}) status: ${res.status}, response: ${text.slice(0, 80)}`);
-    return res.ok;
-  } catch (err: any) {
-    console.warn(`[Instant Sheet Sync Error] ${action}:`, err?.message);
-    return false;
+  const bodyToSend = action === 'batch'
+    ? { action: 'batch', batch: (payload.batch || []).map(withRowAlias) }
+    : withRowAlias({ action, ...payload });
+
+  for (const webhookUrl of candidates) {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyToSend),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(12000)
+      });
+      const text = await res.text();
+      console.log(`[Instant Sheet Sync] ${action} (${payload.sheetName || (payload.batch?.length ? payload.batch.length + ' items' : '')}) status: ${res.status}, response: ${text.slice(0, 80)}`);
+      if (!res.ok) continue;
+      // HTTP 200 alone is not proof of success: Apps Script connectors report
+      // failures as JSON {success:false,error:...} — treat those as failures.
+      let parsed: any = null;
+      try { parsed = JSON.parse(text); } catch (_) {}
+      if (parsed && (parsed.success === false || parsed.error)) continue;
+      if (!parsed && text.trim().startsWith('<')) continue; // HTML error page, not a connector response
+      return true;
+    } catch (err: any) {
+      console.warn(`[Instant Sheet Sync Error] ${action}:`, err?.message);
+    }
   }
+  return false;
 }
 
 async function sendToAppsScriptWebhook(action: string, payload: any): Promise<boolean> {
@@ -2020,17 +2084,26 @@ async function appendRow(name: string, headers: string[], row: any, immediateSyn
     }
   }
 
-  // 3. Immediately sync to Google Sheets if configured, fallback to enqueue
-  if (immediateSync) {
-    executeServerSyncTask({
-      action: 'append',
-      name,
-      headers,
-      row,
-      recordId: cleanRecordId,
-      matchInfo: { SL: cleanSl, pageName: cleanPage, 'Record ID': cleanRecordId, budget: row['Budget'] },
-      oauthToken: currentRequestOAuthToken || undefined
-    }).catch(() => {
+  // 3. Write-through to Google Sheets: AWAITED before returning, so the caller's
+  // success response means the row is actually in the sheet. On failure the write
+  // is queued for automatic retry and the failure is flagged on the RPC response.
+  // Skipped when step 2's direct webhook write already confirmed success — running
+  // both would double-write (for deletes, the second attempt necessarily "fails"
+  // because the row is already gone).
+  if (immediateSync && !synced) {
+    try {
+      await executeServerSyncTask({
+        action: 'append',
+        name,
+        headers,
+        row,
+        recordId: cleanRecordId,
+        matchInfo: { SL: cleanSl, pageName: cleanPage, 'Record ID': cleanRecordId, budget: row['Budget'] },
+        oauthToken: currentRequestOAuthToken || undefined
+      });
+    } catch (syncErr: any) {
+      console.error('[Sheet Sync] Append write-through failed, queued for retry:', syncErr?.message);
+      currentRequestSheetSyncFailure = `Google Sheet save failed for "${name}" — the entry is saved in the app and queued for automatic retry.`;
       enqueueServerSyncTask({
         action: 'append',
         name,
@@ -2039,7 +2112,7 @@ async function appendRow(name: string, headers: string[], row: any, immediateSyn
         recordId: cleanRecordId,
         matchInfo: { SL: cleanSl, pageName: cleanPage, 'Record ID': cleanRecordId, budget: row['Budget'] }
       });
-    });
+    }
   }
 }
 
@@ -2207,14 +2280,28 @@ async function findRowIndexInServerSheet(
         }
       }
 
-      // 4. Match by SL alone if no page conflict
+      // 4. Match by SL alone ONLY if there is no page conflict. Previously this rule
+      // fired even when the caller supplied a Page Name that did NOT match the row,
+      // so an update/delete could hit a different page's row that shares the SL.
       if (!isNaN(cleanSlNum) && !isNaN(rSlNum) && cleanSlNum === rSlNum && cleanSlNum > 0) {
+        if (cleanPage && rPage && cleanPage !== rPage && !cleanPage.includes(rPage) && !rPage.includes(cleanPage)) {
+          continue;
+        }
         return { rowIndex: i + 1, rowData: row };
       }
     }
 
     if (criteria.rowNo && criteria.rowNo > 1 && criteria.rowNo <= values.length) {
-      return { rowIndex: criteria.rowNo, rowData: values[criteria.rowNo - 1] };
+      const candidate = values[criteria.rowNo - 1];
+      // Row numbers drift after sheet-side sorts/deletes: never trust rowNo blindly
+      // when a Record ID was supplied and the row sitting there carries a different one.
+      if (cleanRecId && recIdCol >= 0) {
+        const candidateRecId = String(candidate[recIdCol] || '').trim();
+        if (candidateRecId && candidateRecId !== cleanRecId) {
+          return null;
+        }
+      }
+      return { rowIndex: criteria.rowNo, rowData: candidate };
     }
 
     return null;
@@ -2224,10 +2311,37 @@ async function findRowIndexInServerSheet(
   }
 }
 
+// The deployed Sync Connector v2.0 updates/deletes strictly by rowIndex. A record
+// that was added moments ago can be served to the editor from an in-memory copy that
+// carries no _row (addCampaign keeps a second, sheet-positioned copy that does).
+// Adopt the known sheet row number from ANY local copy sharing the Record ID so a
+// fresh record's first edit/delete still writes through to the correct sheet row.
+function lookupKnownRowNo(name: string, recordId?: string): number | undefined {
+  const rid = String(recordId || '').trim();
+  if (!rid) return undefined;
+  const collections: any[][] = [];
+  if (name.startsWith('Campaign_')) {
+    if (memoryStore.campaigns[name]) collections.push(memoryStore.campaigns[name]);
+    Object.values(memoryStore.campaigns).forEach(list => { if (list !== memoryStore.campaigns[name]) collections.push(list); });
+  } else if (name === 'Payments') collections.push(memoryStore.payments || []);
+  else if (name === 'Scam') collections.push(memoryStore.scams || []);
+  else if (name === 'Agency_Cost') collections.push(memoryStore.agencyCosts || []);
+  else if (name === 'Pause_ADS') collections.push(memoryStore.pauseAds || []);
+  else if (name === 'Today_Created') collections.push(memoryStore.todayCreated || []);
+  for (const list of collections) {
+    const hit = (list || []).find(r => (String(r['Record ID'] || '').trim() === rid || String(r._recordId || '').trim() === rid) && typeof r._row === 'number' && r._row > 1);
+    if (hit) return hit._row;
+  }
+  return undefined;
+}
+
 async function updateRowAt(name: string, headers: string[], rowNo?: number, row?: any, recordId?: string, matchInfo?: any, immediateSync = true): Promise<void> {
   invalidateSheetCache(name);
   if (row) row = normalizeRowDates(row, row['Month'] || row.month);
   let targetRowNo = (typeof rowNo === 'number' && rowNo > 1) ? rowNo : undefined;
+  if (!targetRowNo) {
+    targetRowNo = lookupKnownRowNo(name, recordId || row?.['Record ID'] || row?._recordId || matchInfo?.['Record ID']);
+  }
   let targetSheetTitle = name;
 
   // 1. Instantly update memory store safely (Sub-millisecond latency)
@@ -2277,13 +2391,19 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
   }
   saveStoreToDisk();
 
+  // Per user requirement (same as appendRow): Today_Created is an in-app view only —
+  // never synced to a Google Sheet tab, so don't attempt (or report) a sheet write for it.
+  if (name === 'Today_Created' || name.toLowerCase().includes('today')) {
+    return;
+  }
+
   // 2. Instant direct sync to webhook
   let synced = false;
   if (immediateSync) {
     try {
       synced = await syncWebhookDirect('updateRow', {
         sheetName: targetSheetTitle || name,
-        rowNo: undefined,
+        rowNo: targetRowNo,
         recordId: recordId || row?.['Record ID'] || row?._recordId,
         matchInfo: matchInfo || { SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'], month: row?.['Month'] || row?.month, year: row?.['Year'] || row?.year },
         headers,
@@ -2294,18 +2414,22 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
     }
   }
 
-  // 3. Immediately sync to Google Sheets if configured, fallback to enqueue
-  if (immediateSync) {
-    executeServerSyncTask({
-      action: 'update',
-      name: targetSheetTitle || name,
-      headers,
-      row,
-      rowNo: targetRowNo,
-      recordId,
-      matchInfo,
-      oauthToken: currentRequestOAuthToken || undefined
-    }).catch(() => {
+  // 3. Write-through to Google Sheets: AWAITED before returning (see appendRow).
+  if (immediateSync && !synced) {
+    try {
+      await executeServerSyncTask({
+        action: 'update',
+        name: targetSheetTitle || name,
+        headers,
+        row,
+        rowNo: targetRowNo,
+        recordId,
+        matchInfo,
+        oauthToken: currentRequestOAuthToken || undefined
+      });
+    } catch (syncErr: any) {
+      console.error('[Sheet Sync] Update write-through failed, queued for retry:', syncErr?.message);
+      currentRequestSheetSyncFailure = `Google Sheet update failed for "${targetSheetTitle || name}" — the change is saved in the app and queued for automatic retry.`;
       enqueueServerSyncTask({
         action: 'update',
         name: targetSheetTitle || name,
@@ -2315,13 +2439,16 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
         recordId,
         matchInfo
       });
-    });
+    }
   }
 }
 
 async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matchInfo?: any, immediateSync = true): Promise<void> {
   invalidateSheetCache(name);
   let targetRowNo = (typeof rowNo === 'number' && rowNo > 1) ? rowNo : undefined;
+  if (!targetRowNo) {
+    targetRowNo = lookupKnownRowNo(name, recordId || matchInfo?.['Record ID']);
+  }
   let targetSheetTitle = name;
 
   // 1. Instantly update memory store safely: Never wipe out all items!
@@ -2372,13 +2499,21 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
   }
   saveStoreToDisk();
 
-  // 2. Instant direct sync to webhook (Never blind delete by row index!)
+  // Per user requirement (same as appendRow): Today_Created is an in-app view only —
+  // never synced to a Google Sheet tab, so don't attempt (or report) a sheet write for it.
+  if (name === 'Today_Created' || name.toLowerCase().includes('today')) {
+    return;
+  }
+
+  // 2. Instant direct sync to webhook. The deployed Sync Connector v2.0 deletes by
+  // rowIndex only, so the app's tracked row number (refreshed from the sheet on every
+  // sync) is passed through; the Sheets-API path above still verifies by Record ID.
   let synced = false;
   if (immediateSync) {
     try {
       synced = await syncWebhookDirect('deleteRow', {
         sheetName: targetSheetTitle || name,
-        rowNo: undefined,
+        rowNo: targetRowNo,
         recordId,
         matchInfo
       });
@@ -2387,24 +2522,28 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
     }
   }
 
-  // 3. Immediately sync to Google Sheets if configured, fallback to enqueue
-  if (immediateSync) {
-    executeServerSyncTask({
-      action: 'delete',
-      name: targetSheetTitle || name,
-      rowNo: undefined,
-      recordId,
-      matchInfo,
-      oauthToken: currentRequestOAuthToken || undefined
-    }).catch(() => {
+  // 3. Write-through to Google Sheets: AWAITED before returning (see appendRow).
+  if (immediateSync && !synced) {
+    try {
+      await executeServerSyncTask({
+        action: 'delete',
+        name: targetSheetTitle || name,
+        rowNo: targetRowNo,
+        recordId,
+        matchInfo,
+        oauthToken: currentRequestOAuthToken || undefined
+      });
+    } catch (syncErr: any) {
+      console.error('[Sheet Sync] Delete write-through failed, queued for retry:', syncErr?.message);
+      currentRequestSheetSyncFailure = `Google Sheet delete failed for "${targetSheetTitle || name}" — the deletion is saved in the app and queued for automatic retry.`;
       enqueueServerSyncTask({
         action: 'delete',
         name: targetSheetTitle || name,
-        rowNo: undefined,
+        rowNo: targetRowNo,
         recordId,
         matchInfo
       });
-    });
+    }
   }
 }
 
@@ -2490,6 +2629,19 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
   const { action, name, headers = [], row = {}, rowNo, recordId, matchInfo, oauthToken } = task;
   let targetSheetTitle = name;
 
+  // Today_Created is an in-app view only (per user requirement) — never written to a
+  // Google Sheet tab, so a queued task for it is complete by definition.
+  if (name === 'Today_Created' || name.toLowerCase().includes('today')) {
+    return;
+  }
+
+  // Queued tasks captured before a row number was known (e.g. a fresh record's first
+  // edit) adopt the known sheet row for their Record ID, same as updateRowAt/deleteRowAt.
+  let effectiveRowNo = (typeof rowNo === 'number' && rowNo > 1) ? rowNo : undefined;
+  if (!effectiveRowNo && (action === 'update' || action === 'delete')) {
+    effectiveRowNo = lookupKnownRowNo(name, recordId || row?.['Record ID'] || row?._recordId || matchInfo?.['Record ID']);
+  }
+
   // 1. If explicit user OAuth access token is available, attempt official Google Sheets API
   const tokenToUse = oauthToken || currentRequestOAuthToken;
   if (tokenToUse && SHEET_ID) {
@@ -2537,7 +2689,7 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
           }
           return;
         } else if (action === 'update') {
-          let trn = (typeof rowNo === 'number' && rowNo > 1) ? rowNo : undefined;
+          let trn = effectiveRowNo;
           const resolvedTab = await resolveServerSheetTab(api, SHEET_ID, name, matchInfo?.month || row?.Month, matchInfo?.year || row?.Year);
           if (resolvedTab) {
             targetSheetTitle = resolvedTab.title;
@@ -2571,7 +2723,7 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
           }
           return;
         } else if (action === 'delete') {
-          let trn = (typeof rowNo === 'number' && rowNo > 1) ? rowNo : undefined;
+          let trn = effectiveRowNo;
           const resolvedTab = await resolveServerSheetTab(api, SHEET_ID, name, matchInfo?.month, matchInfo?.year);
           if (resolvedTab) {
             targetSheetTitle = resolvedTab.title;
@@ -2611,10 +2763,13 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
   }
 
   // 2. Direct Apps Script Webhook execution (Immediate, reliable, guaranteed)
+  // The webhook result is now CHECKED: a failed write throws so callers enqueue it
+  // for retry and surface the failure instead of silently pretending it saved.
+  let webhookOk = false;
   if (action === 'append') {
     const cleanRecordId = String(row['Record ID'] || row._recordId || recordId || '').trim();
     const formattedValues = formatRowValuesForSheet(headers, row, row['Month'] || matchInfo?.month);
-    await syncWebhookDirect('appendRow', {
+    webhookOk = await syncWebhookDirect('appendRow', {
       sheetName: name,
       headers,
       recordId: cleanRecordId,
@@ -2622,21 +2777,24 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
     });
   } else if (action === 'update') {
     const formattedValues = formatRowValuesForSheet(headers, row, row?.Month || matchInfo?.month);
-    await syncWebhookDirect('updateRow', {
+    webhookOk = await syncWebhookDirect('updateRow', {
       sheetName: targetSheetTitle || name,
-      rowNo,
+      rowNo: effectiveRowNo,
       recordId: recordId || row?.['Record ID'] || row?._recordId,
       matchInfo: matchInfo || { SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'] },
       headers,
       rowValues: formattedValues
     });
   } else if (action === 'delete') {
-    await syncWebhookDirect('deleteRow', {
+    webhookOk = await syncWebhookDirect('deleteRow', {
       sheetName: targetSheetTitle || name,
-      rowNo: undefined,
+      rowNo: effectiveRowNo,
       recordId,
       matchInfo
     });
+  }
+  if (!webhookOk) {
+    throw new Error(`Sheet write failed (${action} on ${name}): Apps Script webhook did not confirm success.`);
   }
 }
 
@@ -3789,13 +3947,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           }
         }
       };
-
-      if (effectiveRole === 'admin') {
-        preloaded['ad_account_billing'] = {
-          records: { rows: Object.values(memoryStore.adAccountBilling || {}) },
-          stats: { success: true }
-        };
-      }
 
       const activeAdminPin = await getAdminPin();
       const activeViewerPin = await getViewerPin();
@@ -6901,6 +7052,7 @@ app.all('/api/rpc', async (req, res) => {
     } else {
       currentRequestOAuthToken = null;
     }
+    currentRequestSheetSyncFailure = null;
 
     let body = req.body;
     if (Buffer.isBuffer(body)) {
@@ -6935,6 +7087,10 @@ app.all('/api/rpc', async (req, res) => {
           }
           if (!Array.isArray(itemArgs)) itemArgs = [itemArgs];
           const result = await rpc(itemMethod, itemArgs, req, res);
+          if (result && typeof result === 'object' && result.success !== false && currentRequestSheetSyncFailure) {
+            result.sheetSynced = false;
+            result.sheetWarning = currentRequestSheetSyncFailure;
+          }
           return { id: item.id, ok: true, result };
         } catch (err: any) {
           return { id: item.id, ok: false, error: err?.message || 'RPC error' };
@@ -6987,6 +7143,12 @@ app.all('/api/rpc', async (req, res) => {
     }
 
     const result = await rpc(method, args, req, res);
+    // Honest sheet-sync surfacing: if a write-through to Google Sheets failed during
+    // this request, say so on the response instead of pretending everything saved.
+    if (result && typeof result === 'object' && result.success !== false && currentRequestSheetSyncFailure) {
+      result.sheetSynced = false;
+      result.sheetWarning = currentRequestSheetSyncFailure;
+    }
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.status(200).json({ ok: true, result });
@@ -7058,7 +7220,11 @@ async function startServer() {
       });
       app.use(vite.middlewares);
 
-      // In dev mode, serve index.html transformed dynamically by Vite
+      // In dev mode, serve index.html transformed dynamically by Vite.
+      // The Vite transform of the full template runs on every request (~250ms);
+      // cache the transformed output for '/' keyed by the template's content hash —
+      // any edit to index.html changes the hash and re-transforms immediately.
+      let devIndexCache: { hash: string; html: string } | null = null;
       app.use(async (req, res, next) => {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return next();
@@ -7070,6 +7236,15 @@ async function startServer() {
           const rootIndex = path.join(process.cwd(), 'index.html');
           if (fs.existsSync(rootIndex)) {
             let template = fs.readFileSync(rootIndex, 'utf-8');
+            if (req.originalUrl === '/' || req.originalUrl === '/index.html') {
+              const hash = crypto.createHash('sha1').update(template).digest('hex');
+              if (devIndexCache && devIndexCache.hash === hash) {
+                return res.status(200).set({ 'Content-Type': 'text/html' }).end(devIndexCache.html);
+              }
+              const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+              devIndexCache = { hash, html: transformed };
+              return res.status(200).set({ 'Content-Type': 'text/html' }).end(transformed);
+            }
             template = await vite.transformIndexHtml(req.originalUrl, template);
             return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
           }

@@ -16,8 +16,7 @@ export const MENU=[
   {key:'campaign',label:'All Campaign',custom:4},
   {key:'page_summery',label:'Page Summary',custom:3},
   {key:'payment_due_tracker',label:'Payment',custom:2},
-  {key:'agency_spending',label:'Agency Calculation',custom:5},
-  {key:'ad_account_billing',label:'Ad Account Billing',custom:10,adminOnly:true}
+  {key:'agency_spending',label:'Agency Calculation',custom:5}
 ];
 
 export const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

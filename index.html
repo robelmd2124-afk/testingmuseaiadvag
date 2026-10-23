@@ -561,8 +561,6 @@
         <!-- Agency Calculation & Monthly Settlement Executive View Container -->
         <div class="agency-calc-container hidden" id="agencyCalcContainer"></div>
 
-        <!-- Ad Account Billing & Threshold Tracker Container (Admin Only) -->
-        <div class="ad-billing-container hidden" id="adBillingContainer"></div>
 
         <!-- Today Created: Ad Setup Quality Checker & Audit Bar (Admin Only / Today Created) -->
         <div class="today-setup-audit-card hidden" id="todaySetupAuditCard"></div>
@@ -937,147 +935,6 @@
     </div>
   </div>
 
-  <!-- Ad Account Billing Configuration Modal (Admin Only) -->
-  <div class="modal-overlay hidden" id="adBillingModalOverlay" onclick="if(event.target===this)closeAdBillingModal()">
-    <div class="modal" style="max-width:540px;width:95%">
-      <div class="modal-header">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#4F46E5,#818CF8);display:flex;align-items:center;justify-content:center;color:#fff">
-            <span class="ms" style="font-size:20px">credit_card</span>
-          </div>
-          <div>
-            <h3 style="margin:0;font-size:16px;font-weight:800" id="adBillingModalTitle">Ad Account Billing & Threshold</h3>
-            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Configure Due Amount, Threshold Limit & Billing Cycle</p>
-          </div>
-        </div>
-        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAdBillingModal()"><span class="ms">close</span></button>
-      </div>
-      <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
-        <div class="form-field">
-          <label>Ad Account Name *</label>
-          <input type="text" id="billModalAccountName" placeholder="e.g. Master Ads 01" list="billAccountList">
-          <datalist id="billAccountList"></datalist>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-field">
-            <label>Current Due Amount ($ USD) *</label>
-            <input type="number" id="billModalDueAmount" step="any" min="0" placeholder="e.g. 145.50">
-          </div>
-          <div class="form-field">
-            <label>Threshold Limit ($ USD) *</label>
-            <input type="number" id="billModalThreshold" step="any" min="1" placeholder="e.g. 500">
-            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
-              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(250)">$250</button>
-              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(500)">$500</button>
-              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(750)">$750</button>
-              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(900)">$900</button>
-              <button type="button" class="preset-chip" onclick="setBillingThresholdPreset(1000)">$1000</button>
-            </div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-field">
-            <label>Next Billing Date (Auto-Charge)</label>
-            <input type="date" id="billModalBillingDate">
-          </div>
-          <div class="form-field">
-            <label>Account ID / ID Name</label>
-            <input type="text" id="billModalIdName" placeholder="e.g. act_123456789">
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:12px">
-          <div class="form-field">
-            <label>Payment Method / Card Memo</label>
-            <input type="text" id="billModalPaymentMethod" placeholder="e.g. Visa •••• 4242">
-          </div>
-          <div class="form-field">
-            <label>Status</label>
-            <select id="billModalStatus">
-              <option value="active">Active (Normal)</option>
-              <option value="warning">Warning (Near Limit)</option>
-              <option value="critical">Critical (Threshold Full)</option>
-              <option value="paused">Paused / Inactive</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-field">
-          <label>Notes / Memo</label>
-          <input type="text" id="billModalNotes" placeholder="e.g. Card limit resets on 1st, charges at $500 threshold">
-        </div>
-      </div>
-      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
-        <button class="btn btn-secondary" type="button" onclick="closeAdBillingModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" id="btnSaveAdBilling" onclick="saveAdBillingModalForm()">
-          <span class="ms" style="font-size:16px">save</span> Save Account Billing
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 1-Click Quick Update Due Modal (Admin Only) -->
-  <div class="modal-overlay hidden" id="quickDueModalOverlay" onclick="if(event.target===this)closeQuickDueModal()">
-    <div class="modal" style="max-width:440px;width:95%">
-      <div class="modal-header">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#F59E0B,#D97706);display:flex;align-items:center;justify-content:center;color:#fff">
-            <span class="ms" style="font-size:20px">bolt</span>
-          </div>
-          <div>
-            <h3 style="margin:0;font-size:15.5px;font-weight:800">Quick Update Due Amount</h3>
-            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)" id="quickDueAccountSubtitle">Update Ads Manager Spend</p>
-          </div>
-        </div>
-        <button class="btn btn-icon btn-secondary" type="button" onclick="closeQuickDueModal()"><span class="ms">close</span></button>
-      </div>
-      <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
-        <div style="background:var(--card-elevated);padding:10px 14px;border-radius:8px;border:1px solid var(--bor)">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:11.5px;font-weight:700;color:var(--txt-muted)">THRESHOLD LIMIT</span>
-            <span style="font-size:13px;font-weight:800;color:var(--pri)" id="quickDueThresholdDisplay">$500.00</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-            <span style="font-size:11.5px;font-weight:700;color:var(--txt-muted)">CURRENT DUE ON FILE</span>
-            <span style="font-size:13px;font-weight:800;color:var(--dan)" id="quickDueCurrentDisplay">$0.00</span>
-          </div>
-        </div>
-        <div class="form-field">
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>New Due Amount ($ USD)</span>
-            <span style="font-size:11px;color:var(--txt-dim)">Enter actual Facebook Due</span>
-          </label>
-          <div style="position:relative">
-            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-weight:800;font-size:16px;color:var(--txt-muted)">$</span>
-            <input type="number" id="quickDueInput" step="any" min="0" placeholder="0.00" style="padding-left:28px;font-size:18px;font-weight:800;height:44px" oninput="updateQuickDuePreview()">
-          </div>
-          <!-- Quick Preset Increment Buttons -->
-          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-            <button type="button" class="preset-chip" onclick="quickDueAdjust(0, true)">Reset ($0)</button>
-            <button type="button" class="preset-chip" onclick="quickDueAdjust(10)">+$10</button>
-            <button type="button" class="preset-chip" onclick="quickDueAdjust(25)">+$25</button>
-            <button type="button" class="preset-chip" onclick="quickDueAdjust(50)">+$50</button>
-            <button type="button" class="preset-chip" onclick="quickDueAdjust(100)">+$100</button>
-          </div>
-        </div>
-        <div style="background:var(--card-subtle);padding:10px 12px;border-radius:8px;border:1px solid var(--bor);font-size:12px;display:flex;justify-content:space-between;align-items:center">
-          <span style="color:var(--txt-sub)">Remaining Headroom After Update:</span>
-          <span style="font-weight:800;color:var(--suc)" id="quickDueHeadroomPreview">$500.00</span>
-        </div>
-        <div class="form-field" style="margin-top:2px">
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>Next Auto-Charge / Billing Date</span>
-            <span style="font-size:11px;color:var(--txt-dim)">From Ads Manager</span>
-          </label>
-          <input type="date" id="quickDueBillingDate">
-        </div>
-      </div>
-      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
-        <button class="btn btn-secondary" type="button" onclick="closeQuickDueModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" id="btnSubmitQuickDue" onclick="submitQuickDueUpdate()">
-          <span class="ms" style="font-size:16px">bolt</span> Update Due Now
-        </button>
-      </div>
-    </div>
-  </div>
 
   <!-- Live Data Diagnostics & Parity Audit Modal -->
   <div class="modal-overlay hidden" id="diagnosticsModalOverlay">
@@ -2165,7 +2022,7 @@
         <div style="text-align:center;margin-bottom:16px">
           <img src="/favicon.svg" alt="AdVerse Agency" style="width:64px;height:64px;border-radius:14px;background:#2D323E;box-shadow:0 4px 12px rgba(0,0,0,0.15);margin:0 auto 10px;display:block" />
           <h4 style="margin:0;font-size:16px;font-weight:800">AdVerse Agency Suite</h4>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--txt-muted)">Daily Campaign Tracker • Billing & Threshold • Google Sheets Hub</p>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--txt-muted)">Daily Campaign Tracker • Google Sheets Hub</p>
         </div>
 
         <div id="pwaInstallPromptContent">
