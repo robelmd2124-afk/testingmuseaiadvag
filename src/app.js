@@ -2444,6 +2444,17 @@ function initializeApp() {
   const foundMenu = state.menus.find(m => m.key === defaultMenu) || state.menus[0];
   state.currentMenu = foundMenu;
 
+  // Explicit logout wins over every auto-login path (?pin= link, saved/default PIN):
+  // after a logout the PIN screen must appear and stay until a manual PIN login.
+  const isExplicitLogoutEarly = (() => {
+    try { return localStorage.getItem('adverse_logged_out') === 'true'; } catch (_) { return false; }
+  })();
+  if (isExplicitLogoutEarly) {
+    state.userRole = 'unauthorized';
+    showPinLogin('Logged out successfully. Please enter PIN to access.');
+    return;
+  }
+
   const urlPin = checkUrlParamsForLogin();
   let savedPin = localStorage.getItem('adverse_saved_pin');
   let savedRole = localStorage.getItem('adverse_user_role');
@@ -2520,7 +2531,7 @@ function loadAppData(retryCount = 0) {
     state.rate = data.rate || 140;
 
     let savedPin = (localStorage.getItem('adverse_saved_pin') || '').trim();
-    if (!savedPin) {
+    if (!savedPin && localStorage.getItem('adverse_logged_out') !== 'true') {
       savedPin = '01726912624';
       localStorage.setItem('adverse_saved_pin', '01726912624');
       localStorage.setItem('adverse_user_role', 'admin');
