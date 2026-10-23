@@ -4143,21 +4143,28 @@ function renderRecordsTable(data) {
     });
   } else if (state.sortCol) {
     // Explicit user column sort respected
-  } else if (state.campaignSortOrder === 'latest') {
-    // User explicitly chose Latest First
-    records.sort((a, b) => {
-      const slA = parseInt(String(a['SL'] || a['SL NO'] || a['sl_no'] || 0).replace(/\D/g, ''), 10) || 0;
-      const slB = parseInt(String(b['SL'] || b['SL NO'] || a['sl_no'] || 0).replace(/\D/g, ''), 10) || 0;
-      if (slA !== slB) return slB - slA;
-      return (b._row || 0) - (a._row || 0);
-    });
-  } else {
-    // Default for Campaign view: 1-to-1 exact Google Sheet row order!
+  } else if (state.campaignSortOrder === 'sheet') {
+    // Only when the user explicitly picks Sheet Order via the toggle:
+    // 1-to-1 exact Google Sheet row order.
     records.sort((a, b) => {
       if (a._row !== undefined && b._row !== undefined && a._row !== b._row) {
         return (a._row || 0) - (b._row || 0);
       }
       return 0;
+    });
+  } else {
+    // DEFAULT for every entry list: latest entry FIRST, serial by serial —
+    // campaigns by SL descending, dated lists (payments, costs, pause ads)
+    // by Date descending — so the newest entries are always on top and
+    // nobody has to scroll to the bottom to see the last entry.
+    records.sort((a, b) => {
+      const slA = parseInt(String(a['SL'] || a['SL NO'] || a['sl_no'] || 0).replace(/\D/g, ''), 10) || 0;
+      const slB = parseInt(String(b['SL'] || b['SL NO'] || b['sl_no'] || 0).replace(/\D/g, ''), 10) || 0;
+      if (slA !== slB) return slB - slA;
+      const tA = parseAnyDate(a['Date'] || a['Entry Date'] || a['Start'])?.getTime() || 0;
+      const tB = parseAnyDate(b['Date'] || b['Entry Date'] || b['Start'])?.getTime() || 0;
+      if (tA !== tB) return tB - tA;
+      return (b._row || 0) - (a._row || 0);
     });
   }
 
@@ -4784,8 +4791,8 @@ function renderEndAdsTables(data) {
     return true;
   });
 
-  todayList.sort((a, b) => (parseFloat(b['Budget'] || b.budget || 0) || 0) - (parseFloat(a['Budget'] || a.budget || 0) || 0));
-  tomorrowList.sort((a, b) => (parseFloat(b['Budget'] || b.budget || 0) || 0) - (parseFloat(a['Budget'] || a.budget || 0) || 0));
+  todayList.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+  tomorrowList.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
 
   state.currentEndAdsToday = todayList;
   state.currentEndAdsTomorrow = tomorrowList;

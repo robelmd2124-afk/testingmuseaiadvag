@@ -3841,10 +3841,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         return endDateObj ? endDateObj.getTime() <= todayBST.getTime() : true;
       }).map(mapEndAdRow);
 
-      endAdsToday.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-      endAdsTomorrow.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-      endAdsMonthEnded.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-      endAdsAllEnded.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
+      endAdsToday.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+      endAdsTomorrow.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+      endAdsMonthEnded.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+      endAdsAllEnded.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
 
       // Today Created campaigns (Strictly campaigns created on today BST date)
       const todayRows = (memoryStore.todayCreated || []).filter(isValidCampaignRow).filter(c => isSameDay(c['Entry Date'] || c['Date'] || '', todayBST));
@@ -4478,10 +4478,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           return endDateObj ? endDateObj.getTime() <= today.getTime() : true;
         });
 
-        todayRows.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-        tomorrowRows.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-        monthEndedRows.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
-        allEndedRows.sort((a, b) => (Number(b['Budget']) || 0) - (Number(a['Budget']) || 0));
+        todayRows.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+        tomorrowRows.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+        monthEndedRows.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
+        allEndedRows.sort((a, b) => ((parseInt(String(b.SL || b['SL NO'] || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a['SL NO'] || 0).replace(/\D/g, ''), 10) || 0)));
 
         return {
           success: true,
