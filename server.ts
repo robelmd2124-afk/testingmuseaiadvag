@@ -199,6 +199,7 @@ interface MemoryStore {
   campaignVerifications?: { [key: string]: { verified: boolean; verifiedBy: string; verifiedAt: string; notes?: string } };
   users: { displayName: string; role: 'admin' | 'viewer'; pin: string }[];
   syncQueue: ServerSyncTask[];
+  deletedTombstones?: { [key: string]: number };
 }
 
 const memoryStore: MemoryStore = {
@@ -223,7 +224,8 @@ const memoryStore: MemoryStore = {
     { displayName: 'Admin', role: 'admin', pin: '01726912624' },
     { displayName: 'Viewer', role: 'viewer', pin: '01893231534' }
   ],
-  syncQueue: []
+  syncQueue: [],
+  deletedTombstones: {}
 };
 
 let isProcessingServerSyncQueue = false;
@@ -561,6 +563,10 @@ function loadStoreFromDisk(): boolean {
         memoryStore.syncQueue = parsed.memoryStore.syncQueue;
       } else {
         memoryStore.syncQueue = [];
+      }
+      // Restore recent-delete tombstones so a restart cannot resurrect deleted rows
+      if (parsed.memoryStore?.deletedTombstones && typeof parsed.memoryStore.deletedTombstones === 'object') {
+        memoryStore.deletedTombstones = parsed.memoryStore.deletedTombstones;
       }
 
       console.log(`[AdVerse Store]: Successfully restored synced database from disk (${Object.keys(memoryStore.campaigns || {}).length} campaign sheets, ${memoryStore.syncQueue.length} pending sync tasks, sheetId: ${SHEET_ID || 'none'}).`);
@@ -1286,12 +1292,13 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
     });
     // Never wipe known today rows with an empty/failed ingest (prevents intermittent "0 data"):
     // only replace when the sheet actually returned rows; otherwise merge sheet rows over local ones.
-    if (normalizedRows.length > 0) {
+    const liveTodayRows = normalizedRows.filter(r => !isTombstoned(r));
+    if (liveTodayRows.length > 0) {
       if (memoryStore.todayCreated.length === 0) {
-        memoryStore.todayCreated = normalizedRows;
+        memoryStore.todayCreated = liveTodayRows;
       } else {
-        const mergedToday = [...memoryStore.todayCreated];
-        normalizedRows.forEach(nr => {
+        const mergedToday = (memoryStore.todayCreated || []).filter(x => !isTombstoned(x));
+        liveTodayRows.forEach(nr => {
           const idx = mergedToday.findIndex(x => (nr['Record ID'] && x['Record ID'] === nr['Record ID']) || (String(x['SL']) === String(nr['SL']) && String(x['Page Name'] || '').trim().toLowerCase() === String(nr['Page Name'] || '').trim().toLowerCase()));
           if (idx >= 0) mergedToday[idx] = nr; else mergedToday.push(nr);
         });
@@ -1483,10 +1490,13 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
     return normalizeCampaign(c, rowMonth, rowYear, sl);
   });
 
-  // Accurate Sheet Mirroring: Google Sheet is the authoritative source of truth
+  // Accurate Sheet Mirroring: Google Sheet is the authoritative source of truth.
+  // Exception: recently deleted rows (tombstones) must never be resurrected by an
+  // ingest that read the sheet before the delete landed.
+  const liveRows = normalizedRows.filter(r => !isTombstoned(r));
   if (normalizedRows.length > 0) {
-    const unsyncedLocal = (memoryStore.campaigns[cleanTitle] || []).filter(r => r._isLocalUnsynced === true);
-    const mergedList = [...normalizedRows];
+    const unsyncedLocal = (memoryStore.campaigns[cleanTitle] || []).filter(r => r._isLocalUnsynced === true && !isTombstoned(r));
+    const mergedList = [...liveRows];
     unsyncedLocal.forEach(loc => {
       const recId = String(loc['Record ID'] || loc._recordId || '').trim();
       const sl = String(loc.SL || loc['SL'] || '').trim();
@@ -1505,7 +1515,7 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
     memoryStore.campaigns[cleanTitle] = mergedList;
   }
 
-  normalizedRows.forEach(row => {
+  liveRows.forEach(row => {
     const pn = row['Page Name'];
     if (pn && !memoryStore.pages.includes(pn)) {
       memoryStore.pages.push(pn);
@@ -2564,6 +2574,31 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
   }
 }
 
+// Fresh-read verification: does the physical Google Sheet tab still contain
+// this record? The Apps Script connector answers {success:true} for deleteRow
+// even when its scan matched nothing, so write-throughs are verified against
+// the sheet itself and retried when the row is still there.
+async function sheetStillHasRecord(sheetName: string, recordId: string, row?: any): Promise<boolean> {
+  if (!SHEET_ID) return false;
+  const data = await fetchSheetCsvGviz(SHEET_ID, sheetName);
+  if (!data) return false; // cannot verify — do not claim failure
+  const headers = (data.headers || []).map(h => String(h || '').trim().toLowerCase());
+  const recCol = headers.indexOf('record id');
+  const slCol = headers.indexOf('sl');
+  const pageCol = headers.findIndex(h => h.includes('page'));
+  const targetId = String(recordId || '').trim();
+  const targetSl = String(row?.SL || row?.['SL NO'] || '').trim();
+  const targetPage = String(row?.['Page Name'] || '').trim().toLowerCase();
+  for (const r of data.rows) {
+    if (targetId && recCol >= 0 && String(r[recCol] || '').trim() === targetId) return true;
+    if (targetSl && slCol >= 0 && String(r[slCol] || '').trim().replace(/^#/, '') === targetSl.replace(/^#/, '')) {
+      const rp = pageCol >= 0 ? String(r[pageCol] || '').trim().toLowerCase() : '';
+      if (!targetPage || !rp || rp === targetPage) return true;
+    }
+  }
+  return false;
+}
+
 // ==========================================
 // RELIABLE BACKGROUND SYNC QUEUE SYSTEM
 // ==========================================
@@ -3438,6 +3473,50 @@ async function withCampaignLock<T>(fn: () => Promise<T>): Promise<T> {
   } finally {
     release!();
   }
+}
+
+// ==========================================
+// DELETE TOMBSTONES (anti-resurrection guard)
+// A deleted campaign must stay deleted in App AND Sheet, always. The sheet
+// delete travels through the webhook while background/startup syncs keep
+// re-ingesting the sheet; without tombstones, a sync that reads the sheet
+// before the delete lands re-adds the row to memory (it then "stays in the
+// app" until some later full sync). Tombstones are recorded BEFORE the sheet
+// delete is attempted and consulted by every sheet ingest for 15 minutes.
+// ==========================================
+const TOMBSTONE_TTL_MS = 15 * 60 * 1000;
+
+function tombstoneKeysFor(recordId?: string, row?: any): string[] {
+  const keys: string[] = [];
+  const id = String(recordId || row?.['Record ID'] || '').trim();
+  if (id) keys.push('id:' + id);
+  const sl = String(row?.SL || row?.['SL NO'] || row?.sl_no || '').trim();
+  const page = String(row?.['Page Name'] || row?.page_name || '').trim().toLowerCase();
+  if (sl && page) {
+    const m = String(row?.Month || row?.month || '').trim().toLowerCase();
+    const y = String(row?.Year || row?.year || '').trim();
+    keys.push(`sl:${sl}|${page}|${m}|${y}`);
+  }
+  return keys;
+}
+
+function addTombstone(recordId?: string, row?: any): void {
+  if (!memoryStore.deletedTombstones) memoryStore.deletedTombstones = {};
+  const now = Date.now();
+  for (const k of tombstoneKeysFor(recordId, row)) memoryStore.deletedTombstones[k] = now;
+  for (const [k, ts] of Object.entries(memoryStore.deletedTombstones)) {
+    if (now - ts > TOMBSTONE_TTL_MS) delete memoryStore.deletedTombstones[k];
+  }
+}
+
+function isTombstoned(row: any): boolean {
+  const store = memoryStore.deletedTombstones;
+  if (!store || !row) return false;
+  const now = Date.now();
+  return tombstoneKeysFor(row?.['Record ID'], row).some(k => {
+    const ts = store[k];
+    return typeof ts === 'number' && now - ts <= TOMBSTONE_TTL_MS;
+  });
 }
 
 async function nextSL(month: string, year: string | number): Promise<string> {
@@ -5135,9 +5214,12 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           // 1. Add to Month-wise Campaign Sheet (determined by Start Date)
           await appendRow(campaignSheetName(row['Month'] || month, row['Year'] || year), CH, row, true);
 
-          // 2. Ensure Page in Page List
-          if (row['Page Name']) {
-            await appendRow('Page List', ['Page Name'], { 'Page Name': row['Page Name'] }, true);
+          // 2. Ensure Page in Page List — only when genuinely new. Repeat pages
+          // used to cost a second full Apps Script round-trip on every add
+          // (and kept appending duplicate rows to the Page List tab).
+          const pageNameTrimmed = String(row['Page Name'] || '').trim();
+          if (pageNameTrimmed && !memoryStore.pages.some(p => String(p).trim().toLowerCase() === pageNameTrimmed.toLowerCase())) {
+            await appendRow('Page List', ['Page Name'], { 'Page Name': pageNameTrimmed }, true);
           }
 
           const targetSheet = campaignSheetName(row['Month'] || month, row['Year'] || year);
@@ -5191,6 +5273,8 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     }
     case 'updateCampaignRecord': {
       requireAdmin(req);
+      // Serialized with adds/deletes (see deleteCampaignRecord)
+      return await withCampaignLock(async () => {
       const [id, d] = args;
       if (!d || typeof d !== 'object') {
         return { success: false, message: 'Invalid payload for update.' };
@@ -5316,11 +5400,50 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         }
       });
       
+      // Verify the update really landed on the Google Sheet (the connector can
+      // answer success on a no-match, same as deletes): fresh-read the tab and
+      // compare the Budget; retry once, then warn honestly + queue a retry.
+      try {
+        if (SHEET_ID && primarySheet) {
+          const checkSheetBudget = async (): Promise<boolean | null> => {
+            const data = await fetchSheetCsvGviz(SHEET_ID, primarySheet);
+            if (!data) return null;
+            const headers = (data.headers || []).map(h => String(h || '').trim().toLowerCase());
+            const recCol = headers.indexOf('record id');
+            const slCol = headers.indexOf('sl');
+            const budCol = headers.indexOf('budget');
+            if (budCol < 0) return null;
+            for (const rowArr of data.rows) {
+              const rid = recCol >= 0 ? String(rowArr[recCol] || '').trim() : '';
+              const rsl = slCol >= 0 ? String(rowArr[slCol] || '').trim().replace(/^#/, '') : '';
+              if ((cleanId && rid === cleanId) || (merged.SL && rsl === String(merged.SL).trim())) {
+                const sb = parseFloat(String(rowArr[budCol] || '').replace(/[^0-9.]/g, ''));
+                return !isNaN(sb) && Math.abs(sb - Number(merged.Budget || 0)) < 0.01;
+              }
+            }
+            return false;
+          };
+          let okUpdate = await checkSheetBudget();
+          if (okUpdate === false) {
+            await updateRowAt(primarySheet, CH, undefined, merged, cleanId, matchInfo);
+            okUpdate = await checkSheetBudget();
+            if (okUpdate === false) {
+              currentRequestSheetSyncFailure = `Google Sheet update could not be confirmed for "${primarySheet}" — the change is saved in the app and queued for automatic retry.`;
+              enqueueServerSyncTask({ action: 'update', name: primarySheet, headers: CH, row: merged, recordId: cleanId, matchInfo });
+            }
+          }
+        }
+      } catch (_) {}
+
       saveStoreToDisk();
       return { success: true, record: merged };
+      });
     }
     case 'deleteCampaignRecord': {
       requireAdmin(req);
+      // Serialized with adds/updates: concurrent deletes used to interleave
+      // readRows/webhook calls and leave deleted rows behind in memory.
+      return await withCampaignLock(async () => {
       const [id, month, year, clientRow] = args;
       const cleanId = String(id || clientRow?.['Record ID'] || clientRow?._recordId || '').trim();
       const mn = (clientRow && (clientRow.Month || clientRow.month)) || month || MONTHS[new Date().getMonth()];
@@ -5356,6 +5479,9 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           targetSheetName = 'Today_Created';
         }
       }
+
+      // Tombstone BEFORE any sheet delete attempt so no sync can resurrect it
+      addTombstone(cleanId, foundRecord || clientRow);
 
       const matchInfo = {
         SL: foundRecord ? foundRecord.SL : (Number(cleanId) ? cleanId : undefined),
@@ -5407,8 +5533,26 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         });
       });
 
+      // Verify the delete really landed on the Google Sheet; retry once if the
+      // row is still there, otherwise warn honestly + queue an automatic retry.
+      // (The tombstone above keeps the record out of the app in the meantime.)
+      try {
+        if (targetSheetName && targetSheetName !== 'Today_Created' && SHEET_ID) {
+          let stillThere = await sheetStillHasRecord(targetSheetName, cleanId, foundRecord || clientRow);
+          if (stillThere) {
+            await syncWebhookDirect('deleteRow', { sheetName: targetSheetName, recordId: cleanId, matchInfo });
+            stillThere = await sheetStillHasRecord(targetSheetName, cleanId, foundRecord || clientRow);
+            if (stillThere) {
+              currentRequestSheetSyncFailure = `Google Sheet delete could not be confirmed for "${targetSheetName}" — the record is removed in the app and the sheet delete is queued for automatic retry.`;
+              enqueueServerSyncTask({ action: 'delete', name: targetSheetName, recordId: cleanId, matchInfo });
+            }
+          }
+        }
+      } catch (_) {}
+
       saveStoreToDisk();
       return { success: true };
+      });
     }
     case 'addPayment': {
       requireAdmin(req);
@@ -7330,6 +7474,15 @@ async function startServer() {
       } catch (_) {}
     }
   }, 300000);
+
+  // Keep-warm: Apps Script cold starts make the first save/delete after an idle
+  // period take 10-25s. A tiny ping every 4 minutes keeps the connector warm so
+  // real writes confirm in ~2-5s. Fire-and-forget; failures are harmless.
+  setInterval(() => {
+    if (memoryStore.settings?.webhook_url) {
+      syncWebhookDirect('ping', {}).catch(() => {});
+    }
+  }, 240000);
 
   server.on('error', (err: any) => {
     console.error('[AdVerse Server Listen Error]:', err);

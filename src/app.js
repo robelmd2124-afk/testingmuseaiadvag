@@ -9115,7 +9115,8 @@ async function deleteRecordItem(id, row) {
   state.cacheTimestamps = {};
   saveLocalAppSnapshot();
 
-  showToast('Record deleted from App & Google Sheet!', 'success');
+  // No success toast here: it is shown only after the server confirms the
+  // delete (see callback below), so the app never claims a delete that failed.
 
   // 2. Direct Google Sheets OAuth API & Webhook deletion (in background)
   const oauthToken = getGoogleAccessToken();
@@ -9203,6 +9204,11 @@ async function deleteRecordItem(id, row) {
     if (res && res.success === false) {
       showToast(res.message || 'Delete failed on server', 'error');
       loadMenuData();
+    } else if (res && res.sheetWarning) {
+      showToast('Deleted from App — Sheet sync baki ache, auto-retry hobe', 'warning');
+      loadMenuData();
+    } else {
+      showToast('Record deleted from App & Google Sheet!', 'success');
     }
   };
   const errorHandler = err => {
@@ -9853,6 +9859,9 @@ async function saveModalRecord() {
     }
     if (res && res.success === false) {
       showToast(res.message || 'Update failed on server', 'error');
+      loadMenuData();
+    } else if (res && res.sheetWarning) {
+      showToast('Updated in App — Sheet sync baki ache, auto-retry hobe', 'warning');
       loadMenuData();
     }
   };
