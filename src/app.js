@@ -3873,11 +3873,11 @@ function executeLoadMenuData(forced = false) {
             if (!Array.isArray(state.masterCampaignRegistry)) state.masterCampaignRegistry = [];
             const masterMap = new Map();
             state.masterCampaignRegistry.forEach(x => {
-              const id = x['Record ID'] || x._recordId || `${x.SL}_${x['Page Name']}`;
+              const id = x['Record ID'] || x._recordId || `${x.SL}_${x['Page Name']}_${x['AD Account'] || ''}_${x.Types || ''}_${x.Budget || ''}_${x.Start || ''}`;
               masterMap.set(id, x);
             });
             incomingRows.forEach(item => {
-              const id = item['Record ID'] || item._recordId || `${item.SL}_${item['Page Name']}`;
+              const id = item['Record ID'] || item._recordId || `${item.SL}_${item['Page Name']}_${item['AD Account'] || ''}_${item.Types || ''}_${item.Budget || ''}_${item.Start || ''}`;
               const existing = masterMap.get(id);
               masterMap.set(id, existing ? { ...existing, ...item } : item);
             });
@@ -4770,7 +4770,7 @@ function renderEndAdsTables(data) {
   // Deduplicate and sort by Budget descending
   const seenToday = new Set();
   todayList = todayList.filter(r => {
-    const id = r['Record ID'] || r._recordId || `${r.SL}_${r['Page Name']}`;
+    const id = r['Record ID'] || r._recordId || `${r.SL}_${r['Page Name']}_${r['AD Account'] || ''}_${r.Types || ''}_${r.Budget || ''}_${r.Start || ''}`;
     if (seenToday.has(id)) return false;
     seenToday.add(id);
     return true;
@@ -4778,7 +4778,7 @@ function renderEndAdsTables(data) {
 
   const seenTomorrow = new Set();
   tomorrowList = tomorrowList.filter(r => {
-    const id = r['Record ID'] || r._recordId || `${r.SL}_${r['Page Name']}`;
+    const id = r['Record ID'] || r._recordId || `${r.SL}_${r['Page Name']}_${r['AD Account'] || ''}_${r.Types || ''}_${r.Budget || ''}_${r.Start || ''}`;
     if (seenTomorrow.has(id)) return false;
     seenTomorrow.add(id);
     return true;

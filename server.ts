@@ -911,6 +911,36 @@ let isSyncingSpreadsheet = false;
 let lastSyncTimestamp = 0;
 let activeSyncPromise: Promise<any> | null = null;
 
+// Today Created is a VIEW of the campaign data, never an independent store.
+// After every full sync it is rebuilt from the campaign buckets (rows whose
+// Entry Date is today or yesterday, BST) so it can never show rows that All
+// Campaign doesn't have (phantoms) and can never lose rows that it does have.
+// Local not-yet-synced today rows are preserved.
+function rebuildTodayCreatedFromCampaigns(): void {
+  try {
+    const nowBst = getNowBST();
+    const derived: any[] = [];
+    const seen = new Set<string>();
+    const pushRow = (r: any) => {
+      if (!isValidCampaignRow(r)) return;
+      const id = String(r['Record ID'] || r._recordId || '').trim();
+      const key = id || `${r.SL}|${String(r['Page Name'] || '').trim().toLowerCase()}|${r['AD Account'] || ''}|${r.Budget || ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      derived.push(r);
+    };
+    Object.values(memoryStore.campaigns || {}).forEach(rows => {
+      if (!Array.isArray(rows)) return;
+      rows.forEach(r => {
+        const entry = String(r['Entry Date'] || r.entry_date || r['Date'] || '').trim();
+        if (entry && (isSameDay(entry, nowBst) || isSameDay(entry, new Date(nowBst.getTime() - 86400000)))) pushRow(r);
+      });
+    });
+    (memoryStore.todayCreated || []).forEach(r => { if (r && r._isLocalUnsynced === true) pushRow(r); });
+    memoryStore.todayCreated = derived;
+  } catch (_) {}
+}
+
 async function syncAllSpreadsheetData(inputSheetId?: string, retryAttempt = 0): Promise<any> {
   if (inputSheetId) {
     SHEET_ID = extractSpreadsheetId(inputSheetId);
@@ -996,6 +1026,7 @@ async function syncAllSpreadsheetData(inputSheetId?: string, retryAttempt = 0): 
       }
 
       if (processedSheets.length > 0) {
+        rebuildTodayCreatedFromCampaigns();
         saveStoreToDisk();
         return {
           success: true,
@@ -1029,6 +1060,7 @@ async function syncAllSpreadsheetData(inputSheetId?: string, retryAttempt = 0): 
         if (!processedSheets.includes(title)) processedSheets.push(title);
       }
       if (processedSheets.length > 0) {
+        rebuildTodayCreatedFromCampaigns();
         saveStoreToDisk();
         return {
           success: true,
@@ -1096,6 +1128,7 @@ async function syncAllSpreadsheetData(inputSheetId?: string, retryAttempt = 0): 
     }
 
     if (processedSheets.length > 0) {
+      rebuildTodayCreatedFromCampaigns();
       saveStoreToDisk();
       return {
         success: true,
@@ -1215,7 +1248,9 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
       } else {
         const mergedToday = (memoryStore.todayCreated || []).filter(x => !isTombstoned(x));
         liveTodayRows.forEach(nr => {
-          const idx = mergedToday.findIndex(x => (nr['Record ID'] && x['Record ID'] === nr['Record ID']) || (String(x['SL']) === String(nr['SL']) && String(x['Page Name'] || '').trim().toLowerCase() === String(nr['Page Name'] || '').trim().toLowerCase()));
+          // Match by Record ID only: two distinct campaigns can share SL +
+          // Page Name, and an SL+Page match would overwrite one with the other.
+          const idx = nr['Record ID'] ? mergedToday.findIndex(x => x['Record ID'] === nr['Record ID']) : -1;
           if (idx >= 0) mergedToday[idx] = nr; else mergedToday.push(nr);
         });
         memoryStore.todayCreated = mergedToday;
@@ -1415,14 +1450,11 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
     const mergedList = [...liveRows];
     unsyncedLocal.forEach(loc => {
       const recId = String(loc['Record ID'] || loc._recordId || '').trim();
-      const sl = String(loc.SL || loc['SL'] || '').trim();
-      const page = String(loc['Page Name'] || '').trim().toLowerCase();
+      // Presence is decided by Record ID only: an SL + Page Name twin in the
+      // sheet is a different campaign, not proof this local row was synced.
       const isPresent = mergedList.some(r => {
         const rRecId = String(r['Record ID'] || r._recordId || '').trim();
-        if (recId && rRecId && recId === rRecId) return true;
-        const rSl = String(r.SL || r['SL'] || '').trim();
-        const rPage = String(r['Page Name'] || '').trim().toLowerCase();
-        return Boolean(sl && rSl && sl === rSl && page && rPage && page === rPage);
+        return Boolean(recId && rRecId && recId === rRecId);
       });
       if (!isPresent) {
         mergedList.push(loc);
@@ -3092,20 +3124,13 @@ async function campaignRows(month?: string, year?: string | number): Promise<any
   };
 
   const isDuplicateOfExisting = (c: any, list: any[]) => {
+    // Identity is the Record ID ONLY. Rows that merely look alike (same SL,
+    // page, budget and start date) are distinct campaigns — the sheet
+    // legitimately contains such near-twins, and treating them as duplicates
+    // silently dropped real campaigns from All Campaign.
     const recId = String(c['Record ID'] || c._recordId || '').trim();
-    if (recId && recId !== '2026' && recId.length > 8) {
-      if (list.some(x => String(x['Record ID'] || x._recordId || '').trim() === recId)) return true;
-    }
-    const sl = String(c['SL'] || '').trim();
-    const page = String(c['Page Name'] || '').trim().toLowerCase();
-    const bud = String(c['Budget'] || '').trim();
-    const start = String(c['Start'] || c['Start Date'] || '').trim();
-    return list.some(x =>
-      String(x['SL'] || '').trim() === sl &&
-      String(x['Page Name'] || '').trim().toLowerCase() === page &&
-      String(x['Budget'] || '').trim() === bud &&
-      (!start || String(x['Start'] || x['Start Date'] || '').trim() === start)
-    );
+    if (!recId || recId === '2026' || recId.length <= 8) return false;
+    return list.some(x => String(x['Record ID'] || x._recordId || '').trim() === recId);
   };
 
   if (isAll) {
