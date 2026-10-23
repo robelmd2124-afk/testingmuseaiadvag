@@ -1,0 +1,4040 @@
+<script>
+// AdVerse Agency - Client Application Engine
+
+// Google Apps Script Native Dispatcher Bridge
+const IS_GAS = (typeof window !== 'undefined' && (
+  window.location.hostname.includes('script.google.com') ||
+  window.location.hostname.includes('googleusercontent.com')
+));
+
+if (!IS_GAS) {
+  window.google = window.google || {};
+  google.script = google.script || {};
+  google.script.run = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === 'withSuccessHandler') return function(success) {
+        return new Proxy({__success: success}, {
+          get(state, method) {
+            if (method === 'withFailureHandler') return function(failure) {
+              return new Proxy({...state, __failure: failure}, {
+                get(s, realMethod) {
+                  return (...args) => cloudRpc(String(realMethod), args, s.__success, s.__failure);
+                }
+              });
+            };
+            return (...args) => cloudRpc(String(method), args, state.__success, state.__failure);
+          }
+        });
+      };
+      if (prop === 'withFailureHandler') return function(failure) {
+        return new Proxy({__failure: failure}, {
+          get(state, method) {
+            return (...args) => cloudRpc(String(method), args, null, state.__failure);
+          }
+        });
+      };
+      return (...args) => cloudRpc(String(prop), args);
+    }
+  });
+}
+
+async function cloudRpc(method, args, success, failure) {
+  try {
+    if (IS_GAS && window.google && window.google.script && window.google.script.run) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (typeof success === 'function') success(res);
+            resolve(res);
+          })
+          .withFailureHandler(err => {
+            if (typeof failure === 'function') failure(err);
+            reject(err);
+          })
+          .rpc(method, args);
+      });
+    }
+
+    const savedPin = localStorage.getItem('adverse_saved_pin') || '';
+    const res = await fetch('/api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-adverse-pin': savedPin },
+      body: JSON.stringify({ method, args, pin: savedPin })
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || 'Request failed');
+    if (typeof success === 'function') success(data.result);
+    return data.result;
+  } catch (err) {
+    if (typeof failure === 'function') failure({ message: err.message });
+    else console.error('RPC error:', method, err);
+    throw err;
+  }
+}
+
+// Global State
+let state = {
+  menus: [],
+  months: [],
+  currentMenu: null,
+  adAccounts: [],
+  pages: [],
+  rate: 140,
+  rawRecords: [],
+  filteredRecords: [],
+  headers: [],
+  sortCol: null,
+  sortAsc: true,
+  filters: { month: '', year: '', date: '', search: '', pageType: '' },
+  editingId: null,
+  saving: false,
+  userRole: 'unauthorized',
+  displayName: '',
+  theme: localStorage.getItem('adverse_theme') || 'dark',
+  clientCache: {}
+};
+
+const menuIcons = {
+  today_created_campaign: 'today',
+  campaign: 'campaign',
+  end_ads: 'event_busy',
+  page_summery: 'analytics',
+  new_pages: 'pause_circle',
+  agency_spending: 'payments',
+  scam: 'shield_person',
+  agency_cost: 'receipt_long',
+  payment_due_tracker: 'account_balance_wallet'
+};
+
+const MONEY_COLS = ['OFF $', 'Budget', 'Daily $', 'Taka', 'Paid (৳)', 'Spent', 'Remaining', 'Cost', 'Per Person Cost', 'Per Person Taka'];
+const DATE_COLS = ['Start', 'End', 'Entry Date', 'Date', 'Start Date', 'End Date'];
+const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function parseAnyDate(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
+  const str = String(val).trim();
+  if (!str) return null;
+
+  // DD-Mon-YYYY
+  const dMonYMatch = str.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,9})[-/ ](\d{4})$/);
+  if (dMonYMatch) {
+    const day = parseInt(dMonYMatch[1], 10);
+    const monStr = dMonYMatch[2].slice(0, 3).toLowerCase();
+    const year = parseInt(dMonYMatch[3], 10);
+    const mIdx = MONTH_NAMES_SHORT.findIndex(m => m.toLowerCase() === monStr);
+    if (mIdx !== -1) {
+      const d = new Date(year, mIdx, day);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+
+  // YYYY-MM-DD
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    const d = new Date(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10) - 1, parseInt(isoMatch[3], 10));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    const d = new Date(parseInt(dmyMatch[3], 10), parseInt(dmyMatch[2], 10) - 1, parseInt(dmyMatch[1], 10));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  const generic = new Date(str);
+  if (!isNaN(generic.getTime())) return generic;
+  return null;
+}
+
+function getActiveDateFormat() {
+  return (typeof state !== 'undefined' && state.dateFormat) || (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-MM-YYYY';
+}
+
+function formatCustomDate(val, formatOverride) {
+  if (!val && val !== 0) return '';
+  const parsed = parseAnyDate(val);
+  if (!parsed) return String(val);
+  const targetFmt = formatOverride || getActiveDateFormat();
+  const dayPadded = String(parsed.getDate()).padStart(2, '0');
+  const daySingle = String(parsed.getDate());
+  const monIdx = parsed.getMonth();
+  const monShort = MONTH_NAMES_SHORT[monIdx] || 'Jan';
+  const monNum = String(monIdx + 1).padStart(2, '0');
+  const yr = String(parsed.getFullYear());
+
+  switch (targetFmt) {
+    case 'DD-MM-YYYY':
+      return `${dayPadded}-${monNum}-${yr}`;
+    case 'DD/MM/YYYY':
+      return `${dayPadded}/${monNum}/${yr}`;
+    case 'YYYY-MM-DD':
+      return `${yr}-${monNum}-${dayPadded}`;
+    case 'D-Mon-YYYY':
+      return `${daySingle}-${monShort}-${yr}`;
+    case 'DD-Mon-YYYY':
+    default:
+      return `${dayPadded}-${monShort}-${yr}`;
+  }
+}
+
+function getTodayLocalDateStr() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toInputDateValue(val) {
+  const parsed = parseAnyDate(val) || new Date();
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, '0');
+  const d = String(parsed.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtNum(v) {
+  return Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = `toast ${type === 'error' ? 'toast-error' : 'toast-success'} show`;
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function isAdmin() {
+  return state.userRole === 'admin';
+}
+
+// Banglish & Bengali Phonetic Transliteration Engine
+const BanglishEngine = {
+  vowels: {
+    'অ': 'o', 'আ': 'a', 'ই': 'i', 'ঈ': 'ee', 'উ': 'u', 'ঊ': 'oo', 'ঋ': 'ri',
+    'এ': 'e', 'ঐ': 'oi', 'ও': 'o', 'ঔ': 'ou'
+  },
+  vowelSigns: {
+    'া': 'a', 'ি': 'i', 'ী': 'ee', 'ু': 'u', 'ূ': 'oo', 'ৃ': 'ri',
+    'ে': 'e', 'ৈ': 'oi', 'ো': 'o', 'ৌ': 'ou', '্': ''
+  },
+  consonants: {
+    'ক': 'k', 'খ': 'kh', 'গ': 'g', 'ঘ': 'gh', 'ঙ': 'ng',
+    'চ': 'ch', 'ছ': 'chh', 'জ': 'j', 'ঝ': 'jh', 'ঞ': 'n',
+    'ট': 't', 'ঠ': 'th', 'ড': 'd', 'ঢ': 'dh', 'ণ': 'n',
+    'ত': 't', 'থ': 'th', 'দ': 'd', 'ধ': 'dh', 'ন': 'n',
+    'প': 'p', 'ফ': 'f', 'ব': 'b', 'ভ': 'bh', 'ম': 'm',
+    'য': 'j', 'র': 'r', 'ল': 'l', 'শ': 'sh', 'ষ': 'sh', 'স': 's', 'হ': 'h',
+    'ড়': 'r', 'ঢ়': 'rh', 'য়': 'y', 'ৎ': 't', 'ং': 'ng', 'ঃ': 'h', 'ঁ': 'n'
+  },
+  conjuncts: {
+    'ক্ষ': 'kkh', 'জ্ঞ': 'gg', 'ঞ্চ': 'nch', 'ঞ্জ': 'nj', 'ঙ্ক': 'nk', 'ঙ্গ': 'ng',
+    'ণ্ট': 'nt', 'ণ্ঠ': 'nth', 'ণ্ড': 'nd', 'ন্ত': 'nt', 'ন্থ': 'nth', 'ন্দ': 'nd', 'ন্ধ': 'ndh',
+    'ম্প': 'mp', 'ম্ফ': 'mph', 'ম্ব': 'mb', 'ম্ভ': 'mbh', 'ম্ম': 'mm',
+    'ক্ত': 'kt', 'ক্ল': 'kl', 'প্ল': 'pl', 'ব্ল': 'bl', 'গ্ল': 'gl',
+    'ভ্র': 'bhr', 'প্র': 'pr', 'ত্র': 'tr', 'দ্র': 'dr', 'ধ্র': 'dhr', 'গ্র': 'gr',
+    'শ্র': 'shr', 'ফ্র': 'fr', 'ক্র': 'kr', 'ট্র': 'tr', 'ড্র': 'dr',
+    'দ্ব': 'dw', 'ত্ব': 'tw', 'স্ব': 'sw', 'শ্ব': 'shw',
+    'ষ্ট': 'sht', 'ষ্ঠ': 'shth', 'স্প': 'sp', 'স্ফ': 'sph', 'স্ত': 'st', 'স্থ': 'sth', 'স্খ': 'skh'
+  },
+
+  isBengali(str) {
+    return /[\u0980-\u09FF]/.test(String(str || ''));
+  },
+
+  toBanglish(text) {
+    if (!text) return '';
+    const str = String(text).trim();
+    let result = '';
+    let i = 0;
+    const len = str.length;
+
+    while (i < len) {
+      if (i + 1 < len) {
+        const twoChar = str.substring(i, i + 2);
+        if (this.conjuncts[twoChar]) {
+          result += this.conjuncts[twoChar];
+          i += 2;
+          continue;
+        }
+      }
+
+      const ch = str[i];
+      if (this.conjuncts[ch]) {
+        result += this.conjuncts[ch];
+      } else if (this.vowels[ch]) {
+        result += this.vowels[ch];
+      } else if (this.vowelSigns[ch] !== undefined) {
+        result += this.vowelSigns[ch];
+      } else if (this.consonants[ch]) {
+        result += this.consonants[ch];
+      } else {
+        result += ch;
+      }
+      i++;
+    }
+    return result.toLowerCase().trim();
+  },
+
+  getAliases(text) {
+    if (!text) return [];
+    const orig = String(text).trim();
+    const origLower = orig.toLowerCase();
+    const set = new Set([origLower]);
+
+    if (this.isBengali(orig)) {
+      const banglish = this.toBanglish(orig);
+      if (banglish) {
+        set.add(banglish);
+        set.add(banglish.replace(/u/g, 'o'));
+        set.add(banglish.replace(/o/g, 'u'));
+        set.add(banglish.replace(/ee/g, 'i'));
+        set.add(banglish.replace(/i/g, 'ee'));
+        set.add(banglish.replace(/f/g, 'ph'));
+        set.add(banglish.replace(/ph/g, 'f'));
+        set.add(banglish.replace(/sh/g, 's'));
+        set.add(banglish.replace(/s/g, 'sh'));
+        set.add(banglish.replace(/k/g, 'c'));
+        set.add(banglish.replace(/c/g, 'k'));
+        set.add(banglish.replace(/v/g, 'b'));
+        set.add(banglish.replace(/b/g, 'v'));
+        set.add(banglish.replace(/j/g, 'z'));
+
+        const words = banglish.split(/\s+/).filter(Boolean);
+        words.forEach(w => {
+          set.add(w);
+          set.add(w.replace(/u/g, 'o'));
+          set.add(w.replace(/o/g, 'u'));
+          set.add(w.replace(/sh/g, 's'));
+          set.add(w.replace(/s/g, 'sh'));
+          set.add(w.replace(/ee/g, 'i'));
+        });
+
+        if (words.length > 1) {
+          set.add(words.map(w => w[0]).join(''));
+        }
+      }
+
+      const bnWords = orig.split(/\s+/).filter(Boolean);
+      bnWords.forEach(w => set.add(w.toLowerCase()));
+      if (bnWords.length > 1) {
+        set.add(bnWords.map(w => w[0]).join(''));
+      }
+    } else {
+      const words = origLower.split(/\s+/).filter(Boolean);
+      words.forEach(w => set.add(w));
+      if (words.length > 1) {
+        set.add(words.map(w => w[0]).join(''));
+      }
+      set.add(origLower.replace(/c/g, 'k'));
+      set.add(origLower.replace(/k/g, 'c'));
+      set.add(origLower.replace(/ph/g, 'f'));
+      set.add(origLower.replace(/f/g, 'ph'));
+      set.add(origLower.replace(/sh/g, 's'));
+      set.add(origLower.replace(/s/g, 'sh'));
+      set.add(origLower.replace(/u/g, 'o'));
+      set.add(origLower.replace(/o/g, 'u'));
+      set.add(origLower.replace(/v/g, 'b'));
+      set.add(origLower.replace(/b/g, 'v'));
+      set.add(origLower.replace(/z/g, 'j'));
+    }
+
+    return Array.from(set);
+  },
+
+  matches(targetText, query) {
+    if (!query) return true;
+    if (!targetText) return false;
+    const q = String(query).trim().toLowerCase();
+    if (!q) return true;
+
+    const target = String(targetText).trim();
+    const targetLower = target.toLowerCase();
+
+    // 1. Direct substring match
+    if (targetLower.includes(q)) return true;
+
+    // 2. Direct banglish transliteration match
+    const banglish = this.toBanglish(target);
+    if (banglish && (banglish.includes(q) || q.includes(banglish))) return true;
+
+    // 3. Check all aliases
+    const aliases = this.getAliases(target);
+    for (const alias of aliases) {
+      if (alias.includes(q) || q.includes(alias)) return true;
+    }
+
+    // 4. Normalized sound comparison (c/k, f/ph, s/sh, u/o, v/b, z/j)
+    const normalizeSound = s => s
+      .replace(/c/g, 'k')
+      .replace(/ph/g, 'f')
+      .replace(/sh/g, 's')
+      .replace(/ee/g, 'i')
+      .replace(/oo/g, 'u')
+      .replace(/v/g, 'b')
+      .replace(/z/g, 'j')
+      .replace(/tt/g, 't')
+      .replace(/dd/g, 'd');
+
+    const qNorm = normalizeSound(q);
+    const targetNorm = normalizeSound(banglish || targetLower);
+    if (targetNorm.includes(qNorm)) return true;
+
+    for (const alias of aliases) {
+      if (normalizeSound(alias).includes(qNorm)) return true;
+    }
+
+    // 5. Word prefix match
+    const words = targetLower.split(/\s+/);
+    for (const w of words) {
+      if (w.startsWith(q)) return true;
+    }
+    const bWords = banglish.split(/\s+/);
+    for (const w of bWords) {
+      if (w.startsWith(q) || normalizeSound(w).startsWith(qNorm)) return true;
+    }
+
+    return false;
+  },
+
+  getRomanDisplayHint(text) {
+    if (!text || !this.isBengali(text)) return '';
+    const roman = this.toBanglish(text);
+    if (!roman || roman.toLowerCase() === text.toLowerCase()) return '';
+    return roman.replace(/\b\w/g, c => c.toUpperCase());
+  }
+};
+
+// Smart Floating Autocomplete for Page Names (Banglish & Bengali Aware)
+function initSmartPageAutocomplete(inputEl, dropdownEl, options = {}) {
+  if (!inputEl || !dropdownEl) return;
+
+  let selectedIndex = -1;
+  let currentItems = [];
+
+  const getFullPageList = () => {
+    const set = new Set(state.pages || []);
+    (state.rawRecords || []).forEach(r => {
+      const p = r['Page Name'] || r['page_name'];
+      if (p && String(p).trim()) set.add(String(p).trim());
+    });
+    return Array.from(set);
+  };
+
+  const renderDropdown = (query = '') => {
+    const allPages = getFullPageList();
+    const cleanQ = String(query || '').trim();
+
+    let matched = [];
+    if (!cleanQ) {
+      matched = allPages.slice(0, 15);
+    } else {
+      matched = allPages.filter(p => BanglishEngine.matches(p, cleanQ));
+      matched.sort((a, b) => {
+        const aLower = a.toLowerCase();
+        const bLower = b.toLowerCase();
+        const qLower = cleanQ.toLowerCase();
+        const aStarts = aLower.startsWith(qLower);
+        const bStarts = bLower.startsWith(qLower);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+
+        const aBanglish = BanglishEngine.toBanglish(a);
+        const bBanglish = BanglishEngine.toBanglish(b);
+        const aBStarts = aBanglish.startsWith(qLower);
+        const bBStarts = bBanglish.startsWith(qLower);
+        if (aBStarts && !bBStarts) return -1;
+        if (!aBStarts && bBStarts) return 1;
+
+        return a.localeCompare(b);
+      });
+    }
+
+    currentItems = matched;
+    selectedIndex = -1;
+
+    if (!matched.length) {
+      if (cleanQ) {
+        dropdownEl.innerHTML = `
+          <div class="smart-suggestion-item" data-val="${escapeHtml(cleanQ)}" style="border-left:3px solid var(--suc)">
+            <div class="smart-suggestion-name">
+              <div class="smart-suggestion-title">
+                <span class="ms" style="font-size:14px;color:var(--suc);vertical-align:text-bottom">add_circle</span>
+                Use as New Page: "<b>${escapeHtml(cleanQ)}</b>"
+              </div>
+              <div class="smart-suggestion-roman">Click or Enter to select this as a New Page</div>
+            </div>
+            <span class="smart-suggestion-badge new">New Page</span>
+          </div>
+        `;
+        dropdownEl.classList.remove('hidden');
+        bindItemClicks();
+      } else {
+        dropdownEl.classList.add('hidden');
+      }
+      return;
+    }
+
+    dropdownEl.innerHTML = matched.slice(0, 15).map((page, idx) => {
+      const romanHint = BanglishEngine.getRomanDisplayHint(page);
+      const isKnown = (state.pages || []).includes(page);
+      const pastCampaignCount = (state.rawRecords || []).filter(r => String(r['Page Name'] || '').trim().toLowerCase() === page.toLowerCase()).length;
+      
+      return `
+        <div class="smart-suggestion-item" data-idx="${idx}" data-val="${escapeHtml(page)}">
+          <div class="smart-suggestion-name">
+            <div class="smart-suggestion-title">
+              <span class="ms" style="font-size:14px;color:var(--pri);vertical-align:text-bottom">pages</span>
+              ${escapeHtml(page)}
+            </div>
+            ${romanHint ? `<div class="smart-suggestion-roman"><span class="ms" style="font-size:11px">translate</span> ${escapeHtml(romanHint)}</div>` : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${pastCampaignCount > 0 ? `<span style="font-size:10px;color:var(--txt-muted)">${pastCampaignCount} past</span>` : ''}
+            <span class="smart-suggestion-badge ${isKnown || pastCampaignCount > 0 ? 'old' : 'new'}">
+              ${isKnown || pastCampaignCount > 0 ? 'Old Page' : 'New'}
+            </span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const exactMatch = matched.some(m => m.toLowerCase() === cleanQ.toLowerCase());
+    if (cleanQ && !exactMatch) {
+      dropdownEl.innerHTML += `
+        <div class="smart-suggestion-item" data-val="${escapeHtml(cleanQ)}" style="border-top:1px dashed var(--bor);margin-top:4px">
+          <div class="smart-suggestion-name">
+            <div class="smart-suggestion-title" style="color:var(--suc)">
+              <span class="ms" style="font-size:14px;color:var(--suc);vertical-align:text-bottom">add</span>
+              Use as New Page: "<b>${escapeHtml(cleanQ)}</b>"
+            </div>
+          </div>
+          <span class="smart-suggestion-badge new">New</span>
+        </div>
+      `;
+    }
+
+    dropdownEl.classList.remove('hidden');
+    bindItemClicks();
+  };
+
+  const bindItemClicks = () => {
+    dropdownEl.querySelectorAll('.smart-suggestion-item').forEach(item => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const val = item.getAttribute('data-val');
+        if (val) selectPage(val);
+      });
+    });
+  };
+
+  const selectPage = (val) => {
+    inputEl.value = val;
+    dropdownEl.classList.add('hidden');
+    selectedIndex = -1;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    if (typeof options.onSelect === 'function') {
+      options.onSelect(val);
+    }
+  };
+
+  const updateHighlight = () => {
+    const items = dropdownEl.querySelectorAll('.smart-suggestion-item');
+    items.forEach((it, idx) => {
+      it.classList.toggle('highlighted', idx === selectedIndex);
+      if (idx === selectedIndex) {
+        it.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  };
+
+  inputEl.addEventListener('input', () => {
+    renderDropdown(inputEl.value);
+  });
+
+  inputEl.addEventListener('focus', () => {
+    renderDropdown(inputEl.value);
+  });
+
+  inputEl.addEventListener('keydown', e => {
+    const items = dropdownEl.querySelectorAll('.smart-suggestion-item');
+    if (dropdownEl.classList.contains('hidden') || !items.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        renderDropdown(inputEl.value);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex + 1) % items.length;
+      updateHighlight();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+      updateHighlight();
+    } else if (e.key === 'Enter') {
+      if (selectedIndex >= 0 && items[selectedIndex]) {
+        e.preventDefault();
+        const val = items[selectedIndex].getAttribute('data-val');
+        if (val) selectPage(val);
+      }
+    } else if (e.key === 'Escape') {
+      dropdownEl.classList.add('hidden');
+      selectedIndex = -1;
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) {
+      dropdownEl.classList.add('hidden');
+      selectedIndex = -1;
+    }
+  });
+}
+
+// Smart Floating Autocomplete for AD Accounts
+function initSmartAdAccountAutocomplete(inputEl, dropdownEl, options = {}) {
+  if (!inputEl || !dropdownEl) return;
+
+  let selectedIndex = -1;
+
+  const renderDropdown = (query = '') => {
+    const cleanQ = String(query || '').trim().toLowerCase();
+    const list = state.adAccounts || [];
+    let matched = [];
+    if (!cleanQ) {
+      matched = list.slice(0, 15);
+    } else {
+      matched = list.filter(a => {
+        const name = (a.a || '').toLowerCase();
+        const id = (a.id || '').toLowerCase();
+        return name.includes(cleanQ) || id.includes(cleanQ);
+      });
+    }
+
+    selectedIndex = -1;
+    if (!matched.length) {
+      dropdownEl.classList.add('hidden');
+      return;
+    }
+
+    dropdownEl.innerHTML = matched.map((a, idx) => `
+      <div class="smart-suggestion-item" data-idx="${idx}" data-val="${escapeHtml(a.a)}" data-id="${escapeHtml(a.id || '')}">
+        <div class="smart-suggestion-name">
+          <div class="smart-suggestion-title">
+            <span class="ms" style="font-size:14px;color:var(--pri);vertical-align:text-bottom">badge</span>
+            ${escapeHtml(a.a)}
+          </div>
+          <div class="smart-suggestion-roman">ID: ${escapeHtml(a.id || 'N/A')}</div>
+        </div>
+        <span class="smart-suggestion-badge old">AD Account</span>
+      </div>
+    `).join('');
+
+    dropdownEl.classList.remove('hidden');
+
+    dropdownEl.querySelectorAll('.smart-suggestion-item').forEach(item => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const val = item.getAttribute('data-val');
+        const id = item.getAttribute('data-id');
+        if (val) {
+          inputEl.value = val;
+          dropdownEl.classList.add('hidden');
+          if (typeof options.onSelect === 'function') {
+            options.onSelect(val, id);
+          }
+        }
+      });
+    });
+  };
+
+  inputEl.addEventListener('input', () => renderDropdown(inputEl.value));
+  inputEl.addEventListener('focus', () => renderDropdown(inputEl.value));
+  inputEl.addEventListener('keydown', e => {
+    const items = dropdownEl.querySelectorAll('.smart-suggestion-item');
+    if (dropdownEl.classList.contains('hidden') || !items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex + 1) % items.length;
+      items.forEach((it, idx) => it.classList.toggle('highlighted', idx === selectedIndex));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+      items.forEach((it, idx) => it.classList.toggle('highlighted', idx === selectedIndex));
+    } else if (e.key === 'Enter' && selectedIndex >= 0 && items[selectedIndex]) {
+      e.preventDefault();
+      const val = items[selectedIndex].getAttribute('data-val');
+      const id = items[selectedIndex].getAttribute('data-id');
+      if (val) {
+        inputEl.value = val;
+        dropdownEl.classList.add('hidden');
+        if (typeof options.onSelect === 'function') options.onSelect(val, id);
+      }
+    } else if (e.key === 'Escape') {
+      dropdownEl.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) {
+      dropdownEl.classList.add('hidden');
+    }
+  });
+}
+
+// Theme Engine & Luxury Theme Selector
+function applyTheme(theme) {
+  state.theme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('adverse_theme', theme);
+  const icon = document.getElementById('themeIcon');
+  if (icon) {
+    if (theme === 'light') icon.textContent = 'light_mode';
+    else if (theme === 'emerald') icon.textContent = 'spa';
+    else if (theme === 'obsidian') icon.textContent = 'diamond';
+    else icon.textContent = 'palette';
+  }
+}
+
+function toggleThemeDropdown(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('themeDropdownMenu');
+  if (menu) menu.classList.toggle('open');
+}
+
+function toggleSettingsDropdown(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('settingsDropdownMenu');
+  if (menu) {
+    menu.classList.toggle('open');
+  }
+}
+
+function closeAllDropdowns() {
+  const settingsMenu = document.getElementById('settingsDropdownMenu');
+  if (settingsMenu) settingsMenu.classList.remove('open');
+  const themeMenu = document.getElementById('themeDropdownMenu');
+  if (themeMenu) themeMenu.classList.remove('open');
+  document.querySelectorAll('.campaign-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+document.addEventListener('click', (e) => {
+  const isInsideSettings = e.target.closest('.settings-menu-wrap');
+  if (!isInsideSettings) {
+    const settingsMenu = document.getElementById('settingsDropdownMenu');
+    if (settingsMenu) settingsMenu.classList.remove('open');
+  }
+  const isInsideTheme = e.target.closest('.theme-select-wrap');
+  if (!isInsideTheme) {
+    const themeMenu = document.getElementById('themeDropdownMenu');
+    if (themeMenu) themeMenu.classList.remove('open');
+  }
+  const isInsideCamp = e.target.closest('.campaign-dropdown');
+  if (!isInsideCamp) {
+    document.querySelectorAll('.campaign-dropdown.open').forEach(d => d.classList.remove('open'));
+  }
+});
+
+function applyThemeStyle(theme) {
+  applyTheme(theme);
+  const menu = document.getElementById('themeDropdownMenu');
+  if (menu) menu.classList.remove('open');
+  closeAllDropdowns();
+  showToast(`Applied ${theme.toUpperCase()} luxury theme`, 'success');
+}
+
+function toggleTheme() {
+  const nextTheme = state.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(nextTheme);
+  showToast(`Switched to ${nextTheme.toUpperCase()} mode`);
+}
+
+// Exchange Rate Quick Adjuster
+function openRateModal() {
+  const overlay = document.getElementById('rateModalOverlay');
+  const input = document.getElementById('inputNewRate');
+  if (input) input.value = state.rate || 140;
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function closeRateModal() {
+  const overlay = document.getElementById('rateModalOverlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function setQuickRate(val) {
+  const input = document.getElementById('inputNewRate');
+  if (input) input.value = val;
+}
+
+function saveNewRate() {
+  const input = document.getElementById('inputNewRate');
+  const newRate = Number(input?.value) || 140;
+  if (newRate <= 0) {
+    showToast('Please enter a valid rate', 'error');
+    return;
+  }
+  state.rate = newRate;
+  const rateLabel = document.getElementById('hudRateLabel');
+  if (rateLabel) rateLabel.textContent = `৳${newRate}`;
+
+  // Invalidate cache timestamps to force recalculation with new rate without wiping UI
+  state.cacheTimestamps = {};
+
+  google.script.run.withSuccessHandler(res => {
+    closeRateModal();
+    showToast(`Exchange rate updated to ৳${newRate}/$`, 'success');
+    loadMenuData();
+    refreshFinancialHud();
+  }).withFailureHandler(() => {
+    closeRateModal();
+    showToast(`Exchange rate updated locally to ৳${newRate}/$`, 'success');
+    loadMenuData();
+    refreshFinancialHud();
+  }).updateRate(newRate);
+}
+
+function refreshFinancialHud() {
+  google.script.run.withSuccessHandler(data => {
+    if (data && data.stats) {
+      updateFinancialHud(data.stats);
+    }
+  }).getAgencyAnalytics();
+}
+
+function updateFinancialHud(stats) {
+  if (!stats) return;
+  const elBill = document.getElementById('hudTotalBill');
+  const elPaid = document.getElementById('hudCollected');
+  const elDue = document.getElementById('hudDue');
+  const elProfit = document.getElementById('hudProfit');
+  const elRate = document.getElementById('hudRateLabel');
+
+  if (elBill) elBill.textContent = '৳' + fmtNum(stats.totalTaka || stats.totalBill || 0);
+  if (elPaid) elPaid.textContent = '৳' + fmtNum(stats.totalPaid || 0);
+  if (elDue) elDue.textContent = '৳' + fmtNum(stats.totalDue || 0);
+  if (elProfit) elProfit.textContent = '৳' + fmtNum(stats.netProfit || Math.max(0, (stats.totalTaka || 0) - (stats.totalAgencyCost || 0)));
+  if (elRate && state.rate) elRate.textContent = `৳${state.rate}`;
+}
+
+// User & Login handlers
+function showPinLogin(msg) {
+  const overlay = document.getElementById('pinLoginOverlay');
+  if (overlay) overlay.style.display = 'flex';
+  const err = document.getElementById('pinLoginError');
+  if (msg && err) { err.textContent = msg; err.style.display = 'block'; }
+}
+
+function hidePinLogin() {
+  const overlay = document.getElementById('pinLoginOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function quickLogin(pin) {
+  const input = document.getElementById('pinLoginInput');
+  if (input) input.value = pin;
+  submitPinLogin();
+}
+
+function submitPinLogin() {
+  const input = document.getElementById('pinLoginInput');
+  const btn = document.getElementById('pinLoginBtn');
+  const err = document.getElementById('pinLoginError');
+  const pin = (input?.value || '').trim();
+  if (!pin) {
+    if (err) { err.textContent = 'Please enter your PIN.'; err.style.display = 'block'; }
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Unlocking...';
+  if (err) err.style.display = 'none';
+
+  google.script.run.withSuccessHandler(res => {
+    btn.disabled = false; btn.textContent = 'Unlock Dashboard';
+    if (res && res.success) {
+      localStorage.setItem('adverse_saved_pin', pin);
+      if (res.token) localStorage.setItem('adverse_session_token', res.token);
+      if (res.role) localStorage.setItem('adverse_user_role', res.role);
+      hidePinLogin();
+      showToast(`Welcome back, ${res.displayName || (res.role === 'admin' ? 'Admin' : 'Viewer')}!`, 'success');
+      loadAppData();
+    } else {
+      if (err) { err.textContent = res?.message || 'Invalid PIN.'; err.style.display = 'block'; }
+    }
+  }).withFailureHandler(errObj => {
+    btn.disabled = false; btn.textContent = 'Unlock Dashboard';
+    if (err) { err.textContent = errObj?.message || 'Login failed. Please try again.'; err.style.display = 'block'; }
+  }).loginUser(pin);
+}
+
+function appLogout() {
+  localStorage.removeItem('adverse_saved_pin');
+  localStorage.removeItem('adverse_session_token');
+  localStorage.removeItem('adverse_user_role');
+  google.script.run.withSuccessHandler(() => {
+    state.userRole = 'unauthorized';
+    showPinLogin('You have been logged out.');
+  }).logoutUser();
+}
+
+function openRoleLinksModal() {
+  const overlay = document.getElementById('roleLinksOverlay');
+  if (!overlay) return;
+  const baseUrl = window.location.origin + window.location.pathname;
+  const adminUrl = baseUrl + '?pin=1234';
+  const viewerUrl = baseUrl + '?pin=1111';
+
+  const adminInput = document.getElementById('adminLinkInput');
+  const viewerInput = document.getElementById('viewerLinkInput');
+  if (adminInput) adminInput.value = adminUrl;
+  if (viewerInput) viewerInput.value = viewerUrl;
+
+  overlay.classList.remove('hidden');
+}
+
+function closeRoleLinksModal() {
+  const overlay = document.getElementById('roleLinksOverlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function copyLink(elementId) {
+  const input = document.getElementById(elementId);
+  if (!input) return;
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    showToast('Access link copied!', 'success');
+  }).catch(() => {
+    document.execCommand('copy');
+    showToast('Link copied!', 'success');
+  });
+}
+
+function checkUrlParamsForLogin() {
+  const params = new URLSearchParams(window.location.search);
+  let pin = params.get('pin');
+  const role = params.get('role');
+  if (!pin && role) {
+    if (role.toLowerCase() === 'admin') pin = '1234';
+    else if (role.toLowerCase() === 'viewer') pin = '1111';
+  }
+  return pin;
+}
+
+function initializeApp() {
+  applyTheme(state.theme);
+  const urlPin = checkUrlParamsForLogin();
+  if (urlPin) {
+    localStorage.setItem('adverse_saved_pin', urlPin);
+    google.script.run.withSuccessHandler(res => {
+      if (res && res.success) {
+        if (res.token) localStorage.setItem('adverse_session_token', res.token);
+        if (res.role) localStorage.setItem('adverse_user_role', res.role);
+        hidePinLogin();
+        loadAppData();
+      } else {
+        showPinLogin(res?.message || 'Invalid PIN in URL.');
+      }
+    }).loginUser(urlPin);
+    return;
+  }
+
+  const savedPin = localStorage.getItem('adverse_saved_pin');
+  if (savedPin) {
+    google.script.run.withSuccessHandler(res => {
+      if (res && res.success) {
+        if (res.token) localStorage.setItem('adverse_session_token', res.token);
+        if (res.role) localStorage.setItem('adverse_user_role', res.role);
+        hidePinLogin();
+        loadAppData();
+      } else {
+        showPinLogin('Please enter your access PIN.');
+      }
+    }).loginUser(savedPin);
+    return;
+  }
+
+  loadAppData();
+}
+
+function loadAppData() {
+  google.script.run.withSuccessHandler(data => {
+    if (!data || data.error === 'LOGIN_REQUIRED') {
+      showPinLogin(data?.message || 'Please enter your access PIN.');
+      return;
+    }
+    hidePinLogin();
+    state.menus = data.menus || [];
+    state.months = data.months || [];
+    state.adAccounts = data.adAccounts || [];
+    state.pages = data.pages || [];
+    state.rate = data.rate || 140;
+    state.userRole = data.userRole || 'viewer';
+    state.displayName = data.displayName || (isAdmin() ? 'Admin' : 'Viewer');
+
+    const badge = document.getElementById('userBadge');
+    if (badge) badge.textContent = state.displayName;
+
+    renderTopNav();
+    populateFilters();
+    populateAgencyCalcFilters();
+
+    const now = new Date();
+    state.filters.month = state.months[now.getMonth()];
+    state.filters.year = String(now.getFullYear());
+    const fm = document.getElementById('filterMonth');
+    const fy = document.getElementById('filterYear');
+    if (fm) fm.value = state.filters.month;
+    if (fy) fy.value = state.filters.year;
+
+    // Pre-populate 0ms client cache for instant instant loading
+    if (data.preloaded) {
+      const mn = state.filters.month;
+      const yr = state.filters.year;
+      for (const [k, val] of Object.entries(data.preloaded)) {
+        state.clientCache[`${k}_${mn}_${yr}__`] = val;
+        state.clientCache[`${k}_____`] = val;
+        state.clientCache[k] = val;
+        state.cacheTimestamps = state.cacheTimestamps || {};
+        state.cacheTimestamps[`${k}_${mn}_${yr}__`] = Date.now();
+        state.cacheTimestamps[`${k}_____`] = Date.now();
+      }
+      if (data.preloaded.agency_spending && data.preloaded.agency_spending.stats) {
+        updateFinancialHud(data.preloaded.agency_spending.stats);
+      }
+    }
+
+    refreshFinancialHud();
+    selectMenu('today_created_campaign');
+  }).getInitialData();
+}
+
+function renderTopNav() {
+  const nav = document.getElementById('topNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+  state.menus.forEach(m => {
+    if (m.key === 'today_created_campaign' || m.key === 'end_ads' || m.key === 'new_pages') return;
+    if (m.key === 'campaign') {
+      const dropdown = document.createElement('div');
+      dropdown.className = 'campaign-dropdown';
+      const btn = document.createElement('button');
+      const isCampActive = state.currentMenu && ['campaign', 'today_created_campaign', 'end_ads', 'new_pages'].includes(state.currentMenu.key);
+      btn.className = 'nav-btn' + (isCampActive ? ' active' : '');
+      btn.type = 'button';
+      btn.innerHTML = '<span class="ms">campaign</span><span>Campaign</span><span class="ms" style="font-size:16px;opacity:0.6">expand_more</span>';
+      btn.onclick = (e) => { e.stopPropagation(); dropdown.classList.toggle('open'); };
+      dropdown.appendChild(btn);
+
+      const dropdownMenu = document.createElement('div');
+      dropdownMenu.className = 'dropdown-menu';
+      [
+        { k: 'today_created_campaign', label: 'Today Created', icon: 'today' },
+        { k: 'end_ads', label: 'End Ads', icon: 'event_busy' },
+        { k: 'campaign', label: 'All Campaigns', icon: 'list_alt' }
+      ].forEach(itemData => {
+        const item = document.createElement('div');
+        item.className = 'dropdown-item' + (state.currentMenu && state.currentMenu.key === itemData.k ? ' active' : '');
+        item.innerHTML = `<span class="ms">${itemData.icon}</span><span>${itemData.label}</span>`;
+        item.onclick = (e) => { e.stopPropagation(); selectMenu(itemData.k); dropdown.classList.remove('open'); };
+        dropdownMenu.appendChild(item);
+      });
+      dropdown.appendChild(dropdownMenu);
+      nav.appendChild(dropdown);
+    } else {
+      const b = document.createElement('button');
+      b.className = 'nav-btn' + (state.currentMenu && state.currentMenu.key === m.key ? ' active' : '');
+      b.type = 'button';
+      b.innerHTML = `<span class="ms">${menuIcons[m.key] || 'folder'}</span><span>${m.label}</span>`;
+      b.onclick = () => selectMenu(m.key);
+      nav.appendChild(b);
+    }
+  });
+}
+
+function populateFilters() {
+  const ms = document.getElementById('filterMonth');
+  if (!ms) return;
+  ms.innerHTML = '<option value="">All Months</option>';
+  state.months.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    ms.appendChild(o);
+  });
+  const ys = document.getElementById('filterYear');
+  if (!ys) return;
+  ys.innerHTML = '<option value="">All Years</option>';
+  const cy = new Date().getFullYear();
+  for (let y = cy - 2; y <= cy + 1; y++) {
+    const o = document.createElement('option');
+    o.value = String(y); o.textContent = String(y);
+    ys.appendChild(o);
+  }
+}
+
+function populateAgencyCalcFilters() {
+  const ms = document.getElementById('agencyCalcMonth');
+  const ys = document.getElementById('agencyCalcYear');
+  if (!ms || !ys) return;
+  ms.innerHTML = state.months.map(m => `<option value="${m}">${m}</option>`).join('');
+  const cy = new Date().getFullYear();
+  ys.innerHTML = [cy - 2, cy - 1, cy, cy + 1].map(y => `<option value="${y}" ${y===cy?'selected':''}>${y}</option>`).join('');
+}
+
+function selectMenu(key) {
+  state.currentMenu = state.menus.find(m => m.key === key) || { key, label: key.replace(/_/g, ' ') };
+  renderTopNav();
+
+  const isToday = key === 'today_created_campaign';
+  const isEndAds = key === 'end_ads';
+  const isCampaign = key === 'campaign';
+  const isPageSummary = key === 'page_summery';
+  const isPauseAds = key === 'new_pages';
+  const isAgencySpending = key === 'agency_spending';
+  const isScam = key === 'scam';
+  const isAgencyCost = key === 'agency_cost';
+  const isPayment = key === 'payment_due_tracker';
+  const canEdit = isAdmin();
+
+  document.getElementById('pageTitle').textContent = state.currentMenu.label;
+  document.getElementById('pageSubtitle').textContent = isToday ? 'Real-time daily ad campaign records & performance' : `Manage ${state.currentMenu.label}`;
+
+  // Toggle Entry button
+  const btnToggleEntry = document.getElementById('btnToggleEntry');
+  if (btnToggleEntry) {
+    btnToggleEntry.classList.toggle('hidden', !(isToday || isPauseAds || isScam || isAgencyCost) || !canEdit);
+    const textSpan = document.getElementById('btnToggleEntryText');
+    if (textSpan) textSpan.textContent = isToday ? 'New Campaign' : `Add ${state.currentMenu.label}`;
+  }
+
+  // WhatsApp top notice button - only visible in Today Created
+  const btnWaTop = document.getElementById('btnWhatsAppTopNotice');
+  if (btnWaTop) {
+    btnWaTop.classList.toggle('hidden', !isToday);
+  }
+
+  // Today Created entry box stays open by default all the time for Admin
+  const entryCard = document.getElementById('entryCard');
+  if (entryCard) {
+    if (isToday && canEdit) {
+      entryCard.classList.remove('hidden');
+    } else {
+      entryCard.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('filtersBar')?.classList.toggle('hidden', isAgencySpending || !(isPayment || isAgencyCost || isPageSummary || isPauseAds || isScam || isCampaign));
+  document.getElementById('agencyCalcFilterWrap')?.classList.toggle('hidden', !isAgencySpending);
+  document.getElementById('endAdsContainer')?.classList.toggle('hidden', !isEndAds);
+  document.getElementById('paymentEntryCard')?.classList.toggle('hidden', !isPayment || !canEdit);
+  document.getElementById('paymentHistoryCard')?.classList.toggle('hidden', !isPayment);
+  document.getElementById('finalCalcCard')?.classList.toggle('hidden', !isPayment);
+  document.getElementById('recordsCard')?.classList.toggle('hidden', isEndAds || isPayment || isAgencySpending);
+  document.getElementById('dailyStatsWrap')?.classList.toggle('hidden', !isCampaign || !state.filters.date);
+  document.getElementById('campaignDateFilterField')?.classList.toggle('hidden', !isCampaign);
+  document.getElementById('pageTypeFilterField')?.classList.toggle('hidden', !isPageSummary);
+
+  // Clear instant filter
+  const filterInput = document.getElementById('tableFilterInput');
+  if (filterInput) filterInput.value = '';
+
+  // Render entry form
+  if ((isToday || isPauseAds || isScam || isAgencyCost) && canEdit) {
+    renderEntryForm();
+  }
+
+  // 0ms instant display from cache if present
+  const cacheKey = `${key}_${state.filters.month}_${state.filters.year}_${state.filters.date}_${state.filters.pageType}`;
+  const cached = state.clientCache[cacheKey] || state.clientCache[key];
+  if (cached) {
+    if (cached.stats) renderStats(cached.stats);
+    if (key === 'end_ads' && cached.records) renderEndAdsTables(cached.records);
+    else if (key === 'payment_due_tracker' && cached.records) renderPaymentHistoryTable(cached.records, cached.stats);
+    else if (cached.records) renderRecordsTable(cached.records);
+  }
+
+  loadMenuData();
+}
+
+function toggleEntryCard() {
+  const card = document.getElementById('entryCard');
+  if (card) {
+    card.classList.toggle('hidden');
+    if (!card.classList.contains('hidden')) {
+      card.scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+}
+
+function refreshCurrentView() {
+  showToast('Refreshing live data...');
+  loadMenuData();
+}
+
+function renderStats(d) {
+  const key = state.currentMenu ? state.currentMenu.key : 'today_created_campaign';
+  let cards = [];
+  if (key === 'today_created_campaign') {
+    cards = [
+      { icon: 'calendar_today', label: 'Today Entries', value: fmtNum(d.totalRecords), sub: 'Only today', theme: 'stat-purple' },
+      { icon: 'paid', label: 'Today Budget ($)', value: '$' + fmtNum(d.totalBudget), sub: 'Total USD Spend', theme: 'stat-blue' },
+      { icon: 'currency_exchange', label: 'Today Taka', value: '৳' + fmtNum(d.totalTaka), sub: 'Total BDT Revenue', theme: 'stat-green' }
+    ];
+  } else if (key === 'campaign') {
+    cards = [
+      { icon: 'list_alt', label: 'Total Records', value: fmtNum(d.totalRecords), sub: `${state.filters.month || 'All'} ${state.filters.year || ''}`, theme: 'stat-purple' },
+      { icon: 'paid', label: 'Total Budget ($)', value: '$' + fmtNum(d.totalBudget), sub: 'Ad Spend Total', theme: 'stat-blue' },
+      { icon: 'currency_exchange', label: 'Total Taka', value: '৳' + fmtNum(d.totalTaka), sub: 'Gross BDT Bill', theme: 'stat-green' }
+    ];
+  } else if (key === 'end_ads') {
+    cards = [
+      { icon: 'event_busy', label: 'Today End Ads', value: fmtNum(d.todayCount), sub: 'Campaigns ending today', theme: 'stat-red' },
+      { icon: 'event', label: 'Tomorrow End Ads', value: fmtNum(d.tomorrowCount), sub: 'Campaigns ending tomorrow', theme: 'stat-amber' }
+    ];
+  } else if (key === 'page_summery') {
+    cards = [
+      { icon: 'analytics', label: 'Active Pages', value: fmtNum(d.totalRecords), sub: 'Pages Running', theme: 'stat-purple' },
+      { icon: 'ads_click', label: 'Total Ads', value: fmtNum(d.totalAds), sub: 'Total Runs', theme: 'stat-blue' },
+      { icon: 'paid', label: 'Total Budget ($)', value: '$' + fmtNum(d.totalBudget), sub: 'Cumulative', theme: 'stat-green' },
+      { icon: 'fiber_new', label: 'New Pages', value: fmtNum(d.newPages), sub: '$' + fmtNum(d.newBudget), theme: 'stat-amber' },
+      { icon: 'history', label: 'Old Pages', value: fmtNum(d.oldPages), sub: '$' + fmtNum(d.oldBudget), theme: 'stat-purple' }
+    ];
+  } else if (key === 'new_pages') {
+    cards = [
+      { icon: 'pause_circle', label: 'Paused Records', value: fmtNum(d.totalRecords), sub: 'This Month', theme: 'stat-purple' },
+      { icon: 'paid', label: 'Total Budget', value: '$' + fmtNum(d.totalBudget), sub: 'Original Budget', theme: 'stat-blue' },
+      { icon: 'money_off', label: 'Total Spent', value: '$' + fmtNum(d.totalSpent), sub: 'Actual Spend', theme: 'stat-amber' },
+      { icon: 'account_balance_wallet', label: 'Remaining', value: '$' + fmtNum(d.totalRemaining), sub: 'Unused Balance', theme: 'stat-green' }
+    ];
+  } else if (key === 'agency_spending') {
+    cards = [
+      { icon: 'campaign', label: 'Campaigns', value: fmtNum(d.totalCampaign), sub: `${d.month} ${d.year}`, theme: 'stat-purple' },
+      { icon: 'paid', label: 'Budget ($)', value: '$' + fmtNum(d.totalBudget), sub: 'Ad Spend Total', theme: 'stat-blue' },
+      { icon: 'currency_exchange', label: 'Total Bill (৳)', value: '৳' + fmtNum(d.totalTaka), sub: 'Client Invoiced', theme: 'stat-green' },
+      { icon: 'payments', label: 'Collected (৳)', value: '৳' + fmtNum(d.totalPaid), sub: 'Deposits Received', theme: 'stat-green' },
+      { icon: 'account_balance_wallet', label: 'Pending Due (৳)', value: '৳' + fmtNum(d.totalDue), sub: 'Unpaid Client Balance', theme: 'stat-red' },
+      { icon: 'receipt_long', label: 'Agency Cost (৳)', value: '৳' + fmtNum(d.totalCost), sub: 'Operating Expense', theme: 'stat-amber' }
+    ];
+  } else if (key === 'scam') {
+    cards = [
+      { icon: 'money_off', label: 'Total Scam (৳)', value: '৳' + fmtNum(d.totalTaka), sub: 'Total Loss', theme: 'stat-red' },
+      { icon: 'groups', label: 'Per Person (৳)', value: '৳' + fmtNum(d.perPersonTaka), sub: '50% Split Share', theme: 'stat-amber' },
+      { icon: 'currency_exchange', label: 'USD Spent', value: '$' + fmtNum(d.totalSpent), sub: 'Ad Account Loss', theme: 'stat-purple' }
+    ];
+  } else if (key === 'agency_cost') {
+    cards = [
+      { icon: 'receipt_long', label: 'Expense Entries', value: fmtNum(d.totalRecords), sub: 'Logged Costs', theme: 'stat-purple' },
+      { icon: 'paid', label: 'Total Cost (৳)', value: '৳' + fmtNum(d.totalCost), sub: 'Operating Sum', theme: 'stat-amber' }
+    ];
+  }
+
+  const row = document.getElementById('statsRow');
+  if (!row) return;
+  row.innerHTML = cards.map(c => `
+    <div class="stat-card ${c.theme || ''}">
+      <div class="stat-header">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-icon"><span class="ms">${c.icon}</span></div>
+      </div>
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-sub">${c.sub || ''}</div>
+    </div>
+  `).join('');
+}
+
+function isValidClientRow(r, menuKey) {
+  if (!r) return false;
+  if (menuKey === 'agency_cost') {
+    const cost = parseFloat(r['Cost'] || r['cost'] || r['Amount'] || 0) || 0;
+    const type = String(r['Type'] || r['type'] || r['Category'] || '').trim();
+    const month = String(r['Month'] || r['month'] || '').trim();
+    const perPerson = parseFloat(r['Per Person Cost'] || r['per_person_cost'] || 0) || 0;
+    if (cost <= 0 && !type && !month && perPerson <= 0) return false;
+    if (!type && cost <= 0) return false;
+    return true;
+  }
+  if (menuKey === 'today_created_campaign' || menuKey === 'campaign') {
+    const page = String(r['Page Name'] || r['Page_Name'] || r['page_name'] || r['Page'] || r['page'] || '').trim();
+    const sl = String(r['SL'] || r['SL NO'] || r.sl || r.sl_no || '').trim();
+    const adAccount = String(r['AD Account'] || r['Ad Account'] || r['ad_account'] || r['AD'] || r['ad'] || '').trim();
+    const rawBud = String(r['Budget'] !== undefined && r['Budget'] !== null ? r['Budget'] : (r['budget'] !== undefined && r['budget'] !== null ? r['budget'] : '')).replace(/[^0-9.]/g, '');
+    const budget = parseFloat(rawBud) || 0;
+    const rawTaka = String(r['Taka'] !== undefined && r['Taka'] !== null ? r['Taka'] : (r['taka'] !== undefined && r['taka'] !== null ? r['taka'] : '')).replace(/[^0-9.]/g, '');
+    const taka = parseFloat(rawTaka) || 0;
+    const startDate = String(r['Start'] || r['Start Date'] || r.start_date || '').trim();
+
+    if (page.toLowerCase() === 'page name' || page.toLowerCase() === 'page') return false;
+    if (!page && !sl && !adAccount && !startDate && budget <= 0 && taka <= 0) return false;
+    return true;
+  }
+  if (menuKey === 'payment_due_tracker') {
+    const paid = parseFloat(r['Paid (৳)'] || r['Paid'] || 0) || 0;
+    const method = String(r['Payment Method'] || '').trim();
+    if (paid <= 0 && !method) return false;
+    return true;
+  }
+  if (menuKey === 'scam' || menuKey === 'new_pages') {
+    const page = String(r['Page Name'] || '').trim();
+    const link = String(r['Link'] || '').trim();
+    const reason = String(r['Reason'] || '').trim();
+    return Boolean(page || link || reason);
+  }
+  return true;
+}
+
+function loadMenuData(forced) {
+  const key = state.currentMenu.key;
+  const tbody = document.getElementById('tableBody');
+  const cacheKey = `${key}_${state.filters.month}_${state.filters.year}_${state.filters.date}_${state.filters.pageType}`;
+  const cached = state.clientCache[cacheKey];
+
+  if (!forced && cached && (Date.now() - (state.cacheTimestamps[cacheKey] || 0) < 60000)) {
+    const recs = cached.records || cached;
+    const incomingRows = (recs.rows || cached.rows || []).filter(r => isValidClientRow(r, key));
+    state.rawRecords = incomingRows;
+    state.filteredRecords = [...state.rawRecords];
+    state.headers = recs.headers || cached.headers || CH;
+    if (cached.stats) renderStats(cached.stats);
+    renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
+    return;
+  }
+
+  if (tbody && !tbody.innerHTML.trim()) {
+    tbody.innerHTML = '<tr><td colspan="100%" style="text-align:center;padding:24px"><div class="skeleton skeleton-card" style="height:36px;margin:4px 0"></div></td></tr>';
+  }
+
+  google.script.run
+    .withFailureHandler(err => {
+      showToast(err?.message || 'Error communicating with Google Sheet', 'error');
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.success) {
+        showToast(res?.message || 'Failed to load data', 'error');
+        return;
+      }
+      state.clientCache[cacheKey] = res;
+      state.cacheTimestamps[cacheKey] = Date.now();
+
+      if (res.stats) renderStats(res.stats);
+      if (key === 'end_ads') {
+        const endData = res.records || res;
+        renderEndAdsTables(endData);
+      } else if (key === 'payment_due_tracker') {
+        const payData = res.records || res;
+        renderPaymentHistoryTable(payData, res.stats);
+      } else if (key === 'agency_spending') {
+        renderAgencyCalculationView(res.stats || res.records || res);
+      } else {
+        const recs = res.records || res;
+        const incomingRows = (recs.rows || res.rows || []).filter(r => isValidClientRow(r, key));
+        state.rawRecords = incomingRows;
+        state.filteredRecords = [...state.rawRecords];
+        state.headers = recs.headers || res.headers || CH;
+        renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
+      }
+    })
+    .getMenuData(key, state.filters);
+}
+
+function sortTableBy(col) {
+  if (state.sortCol === col) {
+    state.sortAsc = !state.sortAsc;
+  } else {
+    state.sortCol = col;
+    state.sortAsc = true;
+  }
+
+  state.filteredRecords.sort((a, b) => {
+    let valA = a[col] ?? '';
+    let valB = b[col] ?? '';
+    const numA = parseFloat(valA);
+    const numB = parseFloat(valB);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return state.sortAsc ? numA - numB : numB - numA;
+    }
+    return state.sortAsc ? String(valA).localeCompare(String(valB)) : String(valB).localeCompare(String(valA));
+  });
+
+  renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
+}
+
+function filterTableRows(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    state.filteredRecords = [...state.rawRecords];
+  } else {
+    state.filteredRecords = state.rawRecords.filter(row => {
+      return Object.values(row).some(v => {
+        const valStr = String(v ?? '').trim();
+        return valStr.toLowerCase().includes(q) || BanglishEngine.matches(valStr, q);
+      });
+    });
+  }
+  renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
+}
+
+function renderRecordsTable(data) {
+  const thead = document.getElementById('tableHead');
+  const tbody = document.getElementById('tableBody');
+  const empty = document.getElementById('emptyState');
+  const counter = document.getElementById('tableSummaryCounter');
+  const rawList = data.rows || [];
+  const currentKey = state.currentMenu ? state.currentMenu.key : '';
+  const records = rawList.filter(r => isValidClientRow(r, currentKey));
+  const headers = data.headers || [];
+  const hasTaka = headers.some(h => String(h).trim().toLowerCase() === 'taka');
+  const hasTypes = headers.some(h => String(h).trim().toLowerCase() === 'types' || String(h).trim().toLowerCase() === 'type');
+  const isCampaignView = !state.currentMenu 
+    || state.currentMenu.key === 'today_created_campaign' 
+    || state.currentMenu.key === 'today_created' 
+    || state.currentMenu.key === 'campaign' 
+    || hasTaka 
+    || hasTypes;
+
+  let displayColumns = [];
+  if (isCampaignView) {
+    if (!isAdmin()) {
+      displayColumns = ['SL', 'OFF $', 'Status', 'Page Name', 'Start', 'End', 'Types', 'Day', 'Budget', 'Taka'];
+    } else {
+      const beforeTaka = ['SL', 'OFF $', 'AD Account', 'ID Name', 'Status', 'Page Name', 'Start', 'End', 'Types', 'Day', 'Budget'];
+      const hasDaily = headers.some(h => String(h).trim().toLowerCase() === 'daily $');
+      if (hasDaily) beforeTaka.push('Daily $');
+      beforeTaka.push('Taka');
+
+      const rateCol = headers.find(h => {
+        const k = String(h).trim().toLowerCase();
+        return k === 'rate' || k === 'dollar rate (৳)';
+      }) || 'Rate';
+
+      const entryCol = headers.find(h => {
+        const k = String(h).trim().toLowerCase();
+        return k === 'entry date' || k === 'entry';
+      }) || 'Entry Date';
+
+      const monthCol = headers.find(h => String(h).trim().toLowerCase() === 'month') || 'Month';
+      const yearCol = headers.find(h => String(h).trim().toLowerCase() === 'year') || 'Year';
+      const recordIdCol = headers.find(h => {
+        const k = String(h).trim().toLowerCase();
+        return k === 'record id' || k === 'record_id';
+      }) || 'Record ID';
+
+      displayColumns = [
+        ...beforeTaka,
+        'Action',
+        rateCol,
+        entryCol,
+        monthCol,
+        yearCol,
+        recordIdCol
+      ];
+    }
+  } else {
+    const takaIdx = headers.findIndex(h => String(h).trim().toLowerCase() === 'taka');
+    if (takaIdx !== -1 && isAdmin()) {
+      const copy = [...headers];
+      copy.splice(takaIdx + 1, 0, 'Action');
+      displayColumns = copy;
+    } else {
+      const META_COL_KEYS = ['month', 'year', 'record id', 'record_id'];
+      const isMetaColumn = h => META_COL_KEYS.includes(String(h).trim().toLowerCase());
+      const primaryHeaders = headers.filter(h => !isMetaColumn(h));
+      const metaHeaders = headers.filter(h => isMetaColumn(h));
+      displayColumns = [...primaryHeaders, ...metaHeaders];
+      if (isAdmin()) displayColumns.push('Action');
+    }
+  }
+
+  if (counter) {
+    let totalUSD = 0;
+    let totalBDT = 0;
+    records.forEach(r => {
+      if (r['Budget']) totalUSD += parseFloat(r['Budget']) || 0;
+      if (r['Taka']) totalBDT += parseFloat(r['Taka']) || 0;
+    });
+    counter.textContent = totalUSD > 0 
+      ? `${records.length} records • $${fmtNum(totalUSD)} • ৳${fmtNum(totalBDT)}`
+      : `${records.length} records`;
+  }
+
+  if (thead) {
+    thead.innerHTML = `<tr>
+      ${displayColumns.map(h => {
+        if (h === 'Action') return `<th style="text-align:center">Action</th>`;
+        const isSorted = state.sortCol === h;
+        const arrow = isSorted ? (state.sortAsc ? 'arrow_upward' : 'arrow_downward') : 'unfold_more';
+        return `<th onclick="sortTableBy('${escapeHtml(h)}')">${escapeHtml(h)}<span class="ms th-sort">${arrow}</span></th>`;
+      }).join('')}
+    </tr>`;
+  }
+
+  if (tbody) {
+    if (!records.length) {
+      tbody.innerHTML = '';
+      if (empty) empty.classList.remove('hidden');
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+
+    const isTodayCreated = state.currentMenu && (state.currentMenu.key === 'today_created_campaign' || state.currentMenu.key === 'today_created');
+
+    state.currentRenderedRecords = records;
+    tbody.innerHTML = records.map((r, rIdx) => {
+      const renderCell = (h) => {
+        let val = r[h] ?? '';
+        if (MONEY_COLS.includes(h)) return `<td style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${fmtNum(val)}</td>`;
+        if (h === 'Taka' || String(h).toLowerCase() === 'taka') {
+          return `<td style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt)">৳${fmtNum(val)}</td>`;
+        }
+        if (h === 'Rate' || h === 'Dollar Rate (৳)' || String(h).toLowerCase() === 'rate') {
+          return `<td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(val ? `৳${val}` : '')}</td>`;
+        }
+        if (DATE_COLS.includes(h) || String(h).toLowerCase() === 'entry date' || String(h).toLowerCase() === 'entry') {
+          return `<td><span class="table-date" style="font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(formatCustomDate(val))}</span></td>`;
+        }
+        if (h === 'Status') {
+          const isOld = String(val || '').toLowerCase().includes('old');
+          const statusText = isOld ? 'Old Page' : 'New Page';
+          const badgeClass = isOld ? 'badge-old-page' : 'badge-new-page';
+          return `<td><span class="page-status-badge ${badgeClass}">${escapeHtml(val || statusText)}</span></td>`;
+        }
+        if (h === 'Types') return `<td><span class="pill pill-blue">${escapeHtml(val)}</span></td>`;
+        if (String(h).toLowerCase().includes('record id')) {
+          return `<td style="font-family:monospace;font-size:11px;color:var(--txt-dim)">${escapeHtml(val)}</td>`;
+        }
+        return `<td>${escapeHtml(val)}</td>`;
+      };
+
+      return `
+        <tr>
+          ${displayColumns.map(h => {
+            if (h === 'Action') {
+              return `
+                <td style="text-align:center;white-space:nowrap">
+                  ${isCampaignView ? `
+                    <button class="table-btn table-btn-copy" onclick="copyCampaignRecordByIndex(${rIdx})" title="Copy Campaign Format (187/011 Page Start End Type Day $Budget)">
+                      <span class="ms" style="font-size:14px">content_copy</span>
+                    </button>
+                  ` : ''}
+                  ${(isCampaignView || r['Page Name']) ? `
+                    <button class="table-btn table-btn-clone" onclick="cloneCampaignRecordByIndex(${rIdx})" title="Clone / Duplicate this Campaign into New Entry">
+                      <span class="ms" style="font-size:13px">library_add</span> Clone
+                    </button>
+                  ` : ''}
+                  ${isCampaignView && isAdmin() ? `
+                    <button class="table-btn table-btn-increase" onclick="quickIncreaseCampaignByIndex(${rIdx})" title="Quick Increase Campaign">
+                      <span class="ms" style="font-size:13px">trending_up</span> Increase
+                    </button>
+                  ` : ''}
+                  ${isTodayCreated ? `
+                    <button class="table-btn table-btn-wa" onclick="openSingleRecordWhatsAppByIndex(${rIdx})" title="Send WhatsApp Notice">
+                      <span class="ms" style="font-size:14px">chat</span>
+                    </button>
+                  ` : ''}
+                  ${isAdmin() ? `
+                    <button class="table-btn" onclick="openEditRecordByIndex(${rIdx})" title="Edit">
+                      <span class="ms" style="font-size:14px">edit</span>
+                    </button>
+                    <button class="table-btn" style="color:var(--dan)" onclick="deleteRecordByIndex(${rIdx})" title="Delete">
+                      <span class="ms" style="font-size:14px">delete</span>
+                    </button>
+                  ` : ''}
+                </td>
+              `;
+            }
+            return renderCell(h);
+          }).join('')}
+        </tr>
+      `;
+    }).join('');
+  }
+}
+
+function renderEndAdsTables(data) {
+  const todayBody = document.getElementById('todayEndBody');
+  const tomorrowBody = document.getElementById('tomorrowEndBody');
+  if (todayBody) {
+    todayBody.innerHTML = (data.today || []).map(r => `
+      <tr>
+        <td><b>${escapeHtml(r['Page Name'])}</b></td>
+        <td>${escapeHtml(formatCustomDate(r['Start Date']))}</td>
+        <td>${escapeHtml(formatCustomDate(r['End Date']))}</td>
+        <td>${escapeHtml(r['Day'])}</td>
+        <td style="font-weight:800;color:var(--dan);text-align:right">$${fmtNum(r['Budget'])}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--txt-muted)">No campaigns ending today 🎉</td></tr>';
+  }
+  if (tomorrowBody) {
+    tomorrowBody.innerHTML = (data.tomorrow || []).map(r => `
+      <tr>
+        <td><b>${escapeHtml(r['Page Name'])}</b></td>
+        <td>${escapeHtml(formatCustomDate(r['Start Date']))}</td>
+        <td>${escapeHtml(formatCustomDate(r['End Date']))}</td>
+        <td>${escapeHtml(r['Day'])}</td>
+        <td style="font-weight:800;color:var(--wrn);text-align:right">$${fmtNum(r['Budget'])}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--txt-muted)">No campaigns ending tomorrow</td></tr>';
+  }
+}
+
+function renderPaymentHistoryTable(data, stats) {
+  const thead = document.getElementById('paymentTableHead');
+  const tbody = document.getElementById('paymentTableBody');
+  const finalCalcBody = document.getElementById('finalCalcBody');
+
+  if (thead) {
+    thead.innerHTML = `<tr><th>Date</th><th>Payment Method</th><th style="text-align:right">Paid (৳)</th>${isAdmin()?'<th style="text-align:right">Action</th>':''}</tr>`;
+  }
+  if (tbody) {
+    tbody.innerHTML = (data.rows || []).map(r => `
+      <tr>
+        <td>${escapeHtml(formatCustomDate(r['Date']))}</td>
+        <td><span class="pill pill-blue">${escapeHtml(r['Payment Method'])}</span></td>
+        <td style="text-align:right;font-weight:800;color:var(--suc)">৳${fmtNum(r['Paid (৳)'])}</td>
+        ${isAdmin() ? `<td style="text-align:right"><button class="table-btn" style="color:var(--dan)" onclick="deletePaymentItem('${r._recordId}')"><span class="ms" style="font-size:14px">delete</span></button></td>` : ''}
+      </tr>
+    `).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--txt-muted)">No payment records recorded yet.</td></tr>';
+  }
+  if (finalCalcBody && stats) {
+    finalCalcBody.innerHTML = `
+      <tr><td>Total Budget ($)</td><td style="text-align:right;font-weight:700">$${fmtNum(stats.totalBudget)}</td></tr>
+      <tr><td>Exchange Rate (৳/$)</td><td style="text-align:right;font-weight:700">৳${stats.rate || 140}</td></tr>
+      <tr><td>Gross Bill (৳)</td><td style="text-align:right;font-weight:800">৳${fmtNum(stats.totalBill)}</td></tr>
+      <tr><td>Total Paid (৳)</td><td style="text-align:right;font-weight:800;color:var(--suc)">৳${fmtNum(stats.totalPaid)}</td></tr>
+      <tr style="background:var(--pri-light)"><td style="color:var(--pri);font-weight:800">Remaining Balance / Due (৳)</td><td style="text-align:right;font-weight:800;color:var(--pri)">৳${fmtNum(stats.totalDue)}</td></tr>
+    `;
+  }
+}
+
+// Parser for campaign text strings in various formats:
+// 1. Pipe format: "SL: 187 | Page: Ak Master | Start: 12-Sep-2026 | End: 13-Sep-2026 | Type: Increase | Days: 1 | Budget: $56 | Rate: ৳140 | Taka: ৳7840.00 | AD: Agency | 011 (Aminul)"
+// 2. Space format: "187/011 Ak Master 12-Sep-2026 13-Sep-2026 Increase 1 $56"
+function parseCampaignString(str) {
+  if (!str) return null;
+  if (typeof str === 'object') return str;
+  const s = String(str).trim();
+  if (!s) return null;
+
+  // 1. Pipe-separated or key-colon format
+  if (s.includes(':') && (s.includes('|') || s.includes('\n'))) {
+    const obj = {};
+    const rawTokens = s.split(/[\n|]+/).map(t => t.trim()).filter(Boolean);
+    let currentKey = '';
+
+    for (const tok of rawTokens) {
+      const cIdx = tok.indexOf(':');
+      if (cIdx > 0) {
+        currentKey = tok.substring(0, cIdx).trim().toLowerCase();
+        const val = tok.substring(cIdx + 1).trim();
+        assignKeyVal(obj, currentKey, val);
+      } else if (currentKey) {
+        // Appended value without colon (e.g. "Agency" | "011 (Aminul)" inside AD field)
+        appendKeyVal(obj, currentKey, tok);
+      }
+    }
+
+    if (Object.keys(obj).length >= 2) {
+      return obj;
+    }
+  }
+
+  // 2. Space-separated format: [SL]/[AdAccount] [Page Name...] [Start] [End] [Type] [Day] [Budget]
+  // e.g. "187/011 Ak Master 12-Sep-2026 13-Sep-2026 Increase 1 $56"
+  const slashMatch = s.match(/^([A-Za-z0-9]+)\/([A-Za-z0-9_-]+)\s+(.+)$/);
+  if (slashMatch) {
+    const sl = slashMatch[1];
+    const adNum = slashMatch[2];
+    const rest = slashMatch[3].trim();
+    const tokens = rest.split(/\s+/);
+    if (tokens.length >= 6) {
+      const budget = tokens[tokens.length - 1].replace(/[^0-9.]/g, '');
+      const day = tokens[tokens.length - 2].replace(/[^0-9]/g, '');
+      const type = tokens[tokens.length - 3];
+      const end = tokens[tokens.length - 4];
+      const start = tokens[tokens.length - 5];
+      const pageName = tokens.slice(0, tokens.length - 5).join(' ');
+      return {
+        'SL': sl,
+        'sl_no': sl,
+        'AD Account': adNum,
+        'ID Name': adNum,
+        'AD Number': adNum,
+        'Page Name': pageName,
+        'page_name': pageName,
+        'Start': start,
+        'start_date': start,
+        'End': end,
+        'end_date': end,
+        'Types': type,
+        'types': type,
+        'Day': day,
+        'day': day,
+        'Budget': budget,
+        'budget': budget
+      };
+    }
+  }
+
+  return null;
+}
+
+function assignKeyVal(obj, key, val) {
+  if (key.includes('sl')) obj['SL'] = val;
+  else if (key.includes('page')) obj['Page Name'] = val;
+  else if (key.includes('start')) obj['Start'] = val;
+  else if (key.includes('end')) obj['End'] = val;
+  else if (key.includes('type')) obj['Types'] = val;
+  else if (key.includes('day')) obj['Day'] = val.replace(/days?/i, '').trim();
+  else if (key.includes('budget')) obj['Budget'] = val.replace(/[^0-9.]/g, '');
+  else if (key.includes('rate')) obj['Rate'] = val.replace(/[^0-9.]/g, '');
+  else if (key.includes('taka')) obj['Taka'] = val.replace(/[^0-9.]/g, '');
+  else if (key === 'ad' || key.includes('ad account')) {
+    obj['AD Account'] = val;
+    obj['AD'] = val;
+  }
+  else if (key.includes('id')) obj['ID Name'] = val;
+  else if (key.includes('status')) obj['Status'] = val;
+}
+
+function appendKeyVal(obj, key, tok) {
+  if (key === 'ad' || key.includes('ad account')) {
+    obj['AD Account'] = (obj['AD Account'] ? `${obj['AD Account']} | ` : '') + tok;
+    obj['AD'] = obj['AD Account'];
+  } else if (key.includes('page')) {
+    obj['Page Name'] = (obj['Page Name'] ? `${obj['Page Name']} ` : '') + tok;
+  }
+}
+
+// Helper to extract clean Ad Account number/ID from ID Name or AD Account
+function extractAdAccountNumber(r) {
+  if (!r) return '';
+  if (typeof r === 'string') {
+    const parsed = parseCampaignString(r);
+    if (parsed) return extractAdAccountNumber(parsed);
+  }
+
+  const directNum = String(r['AD Number'] || r['ad_number'] || r['adNum'] || '').trim();
+  if (directNum) return directNum;
+
+  const idName = String(r['ID Name'] || r['id_name'] || r['ID'] || r['id'] || '').trim();
+  const adAcc = String(r['AD Account'] || r['ad_account'] || r['AD'] || r['ad'] || r['Account'] || '').trim();
+
+  const findNumberInString = (str) => {
+    if (!str) return '';
+    // Look inside parenthesis or after pipes, e.g. "Agency | 011 (Aminul)" -> "011"
+    const segments = str.split(/[|/()]+/).map(s => s.trim()).filter(Boolean);
+    for (const seg of segments) {
+      const match = seg.match(/^\d+$/);
+      if (match) return match[0];
+    }
+    // Standalone 2-5 digit code (e.g. 011, 001, 18, 105)
+    const codeMatch = str.match(/\b\d{2,5}\b/);
+    if (codeMatch) return codeMatch[0];
+    // Any standalone number
+    const anyNum = str.match(/\b\d+\b/);
+    if (anyNum) return anyNum[0];
+    return '';
+  };
+
+  const idNum = findNumberInString(idName);
+  if (idNum) return idNum;
+
+  const adNum = findNumberInString(adAcc);
+  if (adNum) return adNum;
+
+  // Fallback: clean first token
+  if (idName) {
+    const token = idName.replace(/[()|]/g, ' ').trim().split(/\s+/)[0];
+    if (token) return token;
+  }
+  if (adAcc) {
+    const token = adAcc.replace(/[()|]/g, ' ').trim().split(/\s+/)[0];
+    if (token) return token;
+  }
+
+  return '';
+}
+
+// Campaign Details Formatter & Copy Helper
+// Format: 187/Ad_account_number Page_Name Start End Type Day Budget
+// Example: 187/011 Ak Master 12-Sep-2026 13-Sep-2026 Increase 1 $56
+function formatCampaignText(r) {
+  if (!r) return '';
+  if (Array.isArray(r)) {
+    return r.map(item => formatCampaignText(item)).filter(Boolean).join('\n');
+  }
+  if (typeof r === 'string') {
+    const trimmed = r.trim();
+    if (trimmed.includes('\n')) {
+      return trimmed.split(/\r?\n/).map(line => formatCampaignText(line)).filter(Boolean).join('\n');
+    }
+    const parsed = parseCampaignString(trimmed);
+    if (parsed) r = parsed;
+    else return trimmed;
+  }
+
+  let sl = String(r['SL'] ?? r['sl_no'] ?? r['SL NO'] ?? r['sl'] ?? '').trim();
+  sl = sl.replace(/^#/, '').trim();
+
+  let slAdPart = sl;
+  if (sl.includes('/')) {
+    slAdPart = sl;
+  } else {
+    const adNum = extractAdAccountNumber(r);
+    if (sl && adNum) {
+      slAdPart = `${sl}/${adNum}`;
+    } else if (adNum) {
+      slAdPart = adNum;
+    }
+  }
+
+  const page = String(r['Page Name'] || r['page_name'] || r['Page'] || r['page'] || '').trim();
+  const start = formatCustomDate(r['Start'] || r['Start Date'] || r['start_date'] || r['start'] || '');
+  const end = formatCustomDate(r['End'] || r['End Date'] || r['end_date'] || r['end'] || '');
+  const type = String(r['Types'] || r['types'] || r['Type'] || r['type'] || 'Boost').trim();
+  const rawDay = String(r['Day'] || r['day'] || r['Days'] || r['days'] || '1').trim();
+  const day = rawDay.replace(/[^0-9]/g, '') || '1';
+
+  let rawBudget = String(r['Budget'] || r['budget'] || '0').trim();
+  let budgetClean = rawBudget.replace(/^\$/, '').trim();
+  let budget = `$${budgetClean}`;
+
+  const parts = [
+    slAdPart,
+    page,
+    start,
+    end,
+    type,
+    day,
+    budget
+  ].filter(p => p !== undefined && p !== null && String(p).trim() !== '');
+
+  return parts.join(' ');
+}
+
+function copyCampaignRecord(record) {
+  let text = '';
+  if (Array.isArray(record)) {
+    text = record.map(r => formatCampaignText(r)).filter(Boolean).join('\n');
+  } else if (typeof record === 'string') {
+    text = record;
+  } else {
+    text = formatCampaignText(record);
+  }
+  if (!text) return;
+
+  const count = text.split('\n').filter(Boolean).length;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      if (count > 1) {
+        showToast(`📋 Copied ${count} campaigns to clipboard:\n${text}`, 'success');
+      } else {
+        showToast(`📋 Copied: ${text}`, 'success');
+      }
+    }).catch(() => {
+      fallbackCopyCampaignText(text);
+    });
+  } else {
+    fallbackCopyCampaignText(text);
+  }
+}
+
+function copyCampaignRecordByIndex(idx) {
+  const list = state.currentRenderedRecords || state.filteredRecords || state.rawRecords || [];
+  const r = list[idx];
+  if (r) {
+    copyCampaignRecord(r);
+  }
+}
+
+function copyAllCurrentTableCampaigns() {
+  const list = state.currentRenderedRecords || state.filteredRecords || state.rawRecords || [];
+  const validCampaigns = list.filter(r => r && (r['Page Name'] || r['page_name'] || r['Budget']));
+  if (!validCampaigns.length) {
+    showToast('No campaigns found in current view to copy', 'warning');
+    return;
+  }
+  const allText = validCampaigns.map(r => formatCampaignText(r)).filter(Boolean).join('\n');
+  copyCampaignRecord(allText);
+  showToast(`📋 All ${validCampaigns.length} campaigns copied to clipboard! (Each separated)`, 'success');
+}
+
+function fallbackCopyCampaignText(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    const count = text.split('\n').filter(Boolean).length;
+    if (count > 1) {
+      showToast(`📋 Copied ${count} campaigns to clipboard!`, 'success');
+    } else {
+      showToast(`📋 Copied: ${text}`, 'success');
+    }
+  } catch (e) {
+    showToast('Copied to clipboard', 'success');
+  }
+  document.body.removeChild(ta);
+}
+
+function renderSavedCampaignsNotice(savedItems) {
+  if (!savedItems || !savedItems.length) return;
+  state.lastSavedCampaigns = savedItems;
+  let noticeBox = document.getElementById('lastSavedNoticeBox');
+  if (!noticeBox) {
+    const entryCard = document.getElementById('entryCard');
+    if (!entryCard) return;
+    noticeBox = document.createElement('div');
+    noticeBox.id = 'lastSavedNoticeBox';
+    const form = document.getElementById('entryForm');
+    if (form && form.parentElement) {
+      form.parentElement.insertBefore(noticeBox, form);
+    }
+  }
+
+  noticeBox.style.cssText = 'margin-bottom:12px;padding:10px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:var(--radius-md);display:flex;flex-direction:column;gap:8px';
+
+  noticeBox.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--suc)">
+        <span class="ms" style="font-size:18px">check_circle</span>
+        <span>Saved ${savedItems.length} Campaign${savedItems.length > 1 ? 's' : ''} (All Copied to Clipboard):</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${savedItems.length > 1 ? `
+          <button type="button" class="btn btn-primary" onclick="copyMultipleSavedCampaigns()" style="padding:3px 9px;font-size:11px;display:inline-flex;align-items:center;gap:4px">
+            <span class="ms" style="font-size:13px">content_copy</span> Copy All (${savedItems.length})
+          </button>
+        ` : ''}
+        <button type="button" style="background:transparent;border:none;color:var(--txt-muted);cursor:pointer;font-size:14px" onclick="document.getElementById('lastSavedNoticeBox')?.remove()">✕</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${savedItems.map((r, i) => {
+        const text = formatCampaignText(r);
+        const sl = r['SL'] || r['sl_no'] || (i + 1);
+        return `
+          <button type="button" class="btn btn-secondary" onclick="copySingleSavedCampaignByIndex(${i})" style="padding:3px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" title="${escapeHtml(text)}">
+            <span class="ms" style="font-size:13px">content_copy</span> Copy #${sl}
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function copyMultipleSavedCampaigns() {
+  if (state.lastSavedCampaigns && state.lastSavedCampaigns.length) {
+    const allText = state.lastSavedCampaigns.map(r => formatCampaignText(r)).filter(Boolean).join('\n');
+    copyCampaignRecord(allText);
+    showToast(`📋 Copied all ${state.lastSavedCampaigns.length} campaigns! (Each separated)`, 'success');
+  }
+}
+
+function copySingleSavedCampaignByIndex(idx) {
+  if (state.lastSavedCampaigns && state.lastSavedCampaigns[idx]) {
+    const text = formatCampaignText(state.lastSavedCampaigns[idx]);
+    copyCampaignRecord(text);
+    showToast(`📋 Copied #${state.lastSavedCampaigns[idx]['SL'] || ''}: ${text}`, 'success');
+  }
+}
+
+function handleQuickCampaignPaste() {
+  const input = document.getElementById('quickPasteCampaignInput');
+  const val = (input?.value || '').trim();
+  if (!val) {
+    showToast('Please paste a campaign text first', 'warning');
+    return;
+  }
+
+  // Support multiline paste (multiple campaigns)
+  const lines = val.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const parsedList = [];
+  for (const line of lines) {
+    const p = parseCampaignString(line);
+    if (p) parsedList.push(p);
+  }
+
+  if (!parsedList.length) {
+    showToast('Could not parse text. Expected: SL: 187 | Page: ... or 187/011 Page...', 'error');
+    return;
+  }
+
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+
+  const parsed = parsedList[0];
+
+  if (parsed['SL']) {
+    const slInput = form.querySelector('[name="sl_no"]');
+    if (slInput) slInput.value = parsed['SL'];
+  }
+  if (parsed['Page Name']) {
+    const pageInput = form.querySelector('#pageNameInput');
+    if (pageInput) {
+      pageInput.value = parsed['Page Name'];
+      handlePageNameLookup(parsed['Page Name']);
+    }
+  }
+  if (parsed['Start']) {
+    const startInput = form.querySelector('[name="start_date"]');
+    const dVal = toInputDateValue(parsed['Start']);
+    if (startInput && dVal) startInput.value = dVal;
+  }
+  if (parsed['End']) {
+    const endInput = form.querySelector('[name="end_date"]');
+    const dVal = toInputDateValue(parsed['End']);
+    if (endInput && dVal) endInput.value = dVal;
+  }
+  if (parsed['Types']) {
+    const typeSelect = form.querySelector('#typesSelect');
+    if (typeSelect) typeSelect.value = parsed['Types'];
+  }
+  if (parsed['Day']) {
+    const dayInput = form.querySelector('[name="day"]');
+    if (dayInput) dayInput.value = parsed['Day'];
+  }
+  if (parsed['Budget']) {
+    const budgetInput = form.querySelector('[name="budget"]');
+    if (budgetInput) budgetInput.value = parsed['Budget'];
+  }
+  if (parsed['Rate']) {
+    const rateInput = form.querySelector('[name="rate"]');
+    if (rateInput) rateInput.value = parsed['Rate'];
+  }
+  if (parsed['Taka']) {
+    const takaInput = form.querySelector('[name="taka"]');
+    if (takaInput) takaInput.value = parsed['Taka'];
+  }
+
+  if (parsed['AD Account']) {
+    const adInput = form.querySelector('#adAccountInput');
+    const idInput = form.querySelector('#idNameInput');
+    if (adInput) adInput.value = parsed['AD Account'];
+    if (idInput && parsed['ID Name']) idInput.value = parsed['ID Name'];
+    else if (idInput) {
+      const num = extractAdAccountNumber(parsed);
+      if (num) idInput.value = num;
+    }
+  }
+
+  // If multiple campaigns were pasted, automatically generate sub-campaign rows for the rest
+  const rowsContainer = document.getElementById('multipleCampaignRows');
+  if (rowsContainer) rowsContainer.innerHTML = '';
+
+  if (parsedList.length > 1) {
+    for (let i = 1; i < parsedList.length; i++) {
+      const sub = parsedList[i];
+      addMultipleCampaignRow();
+      const currentRows = rowsContainer?.querySelectorAll('.multi-campaign-row');
+      const lastRow = currentRows ? currentRows[currentRows.length - 1] : null;
+      if (lastRow) {
+        const dayInput = lastRow.querySelector('.multi-campaign-day');
+        const budgetInput = lastRow.querySelector('.multi-campaign-budget');
+        if (dayInput && sub['Day']) dayInput.value = sub['Day'];
+        if (budgetInput && sub['Budget']) budgetInput.value = sub['Budget'];
+      }
+    }
+  }
+
+  const startInput = form.querySelector('[name="start_date"]');
+  if (startInput) {
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (window.updateCampaignCalc) window.updateCampaignCalc();
+
+  // Copy all parsed campaigns, each on a separate line
+  const allFormatted = parsedList.map(p => formatCampaignText(p)).filter(Boolean).join('\n');
+  copyCampaignRecord(allFormatted);
+  showToast(`📋 ${parsedList.length} campaign${parsedList.length > 1 ? 's' : ''} auto-filled & all copied!`, 'success');
+  renderSavedCampaignsNotice(parsedList);
+}
+
+function applyIncreaseCampaign(c) {
+  const form = document.getElementById('entryForm');
+  if (!form || !c) return;
+
+  const typeSelect = form.querySelector('#typesSelect') || form.querySelector('[name="types"]');
+  const startInput = form.querySelector('[name="start_date"]');
+  const adInput = form.querySelector('#adAccountInput') || form.querySelector('[name="ad_account"]');
+  const idInput = form.querySelector('#idNameInput') || form.querySelector('[name="id_name"]');
+  const budgetInput = form.querySelector('[name="budget"]');
+
+  const rawEnd = c.endInputVal || c.end || c['End'] || c['End Date'] || '';
+  const inputDateVal = toInputDateValue(rawEnd);
+  const formattedEndDate = formatCustomDate(rawEnd);
+
+  if (typeSelect) typeSelect.value = 'Increase';
+  if (startInput && inputDateVal) {
+    startInput.value = inputDateVal;
+  }
+  if (adInput && (c.adAccount || c['AD Account'])) adInput.value = c.adAccount || c['AD Account'];
+  if (idInput && (c.idName || c['ID Name'])) idInput.value = c.idName || c['ID Name'];
+  if (budgetInput && (c.budget || c['Budget'])) budgetInput.value = c.budget || c['Budget'];
+
+  // Dispatch events to trigger recalculation and ensure UI reactivity
+  if (startInput) {
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (window.updateCampaignCalc) {
+    window.updateCampaignCalc();
+  }
+
+  // Highlight selected button
+  const btns = form.querySelectorAll('.campaign-select-btn');
+  btns.forEach(b => b.classList.remove('active'));
+  const activeBtn = Array.from(btns).find(b => b.textContent.includes(c.slLabel || c.sl));
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const label = c.slLabel || (c.month ? `${c.month.slice(0, 3)} #${c.sl}` : `SL #${c.sl}`);
+  showToast(`⚡ Selected campaign [${label}]. Start date set to ${formattedEndDate || inputDateVal}`, 'success');
+}
+
+function applyIncreaseCampaignByIndex(idx) {
+  const campaigns = state.currentProfileCampaigns || [];
+  const c = campaigns[idx];
+  if (c) {
+    applyIncreaseCampaign(c);
+  }
+}
+
+function applyIncreaseStartDate(dateStr) {
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+  const startInput = form.querySelector('[name="start_date"]');
+  const typeSelect = form.querySelector('#typesSelect') || form.querySelector('[name="types"]');
+  const inputDateVal = toInputDateValue(dateStr);
+  const formattedDate = formatCustomDate(dateStr);
+
+  if (typeSelect) typeSelect.value = 'Increase';
+  if (startInput && inputDateVal) {
+    startInput.value = inputDateVal;
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (window.updateCampaignCalc) {
+    window.updateCampaignCalc();
+  }
+  showToast(`⚡ Start Date set to ${formattedDate || inputDateVal} for Increase`, 'success');
+}
+
+function quickIncreaseCampaign(r) {
+  if (!isAdmin()) {
+    showToast('Admin access required to increase campaign', 'error');
+    return;
+  }
+  
+  const card = document.getElementById('entryCard');
+  if (card) card.classList.remove('hidden');
+
+  renderEntryForm();
+
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+
+  const rawEnd = r['End'] || r['End Date'] || new Date();
+  const inputDateVal = toInputDateValue(rawEnd);
+  const formattedEndDate = formatCustomDate(rawEnd);
+  const sl = String(r['SL'] || r['sl_no'] || '').padStart(3, '0');
+  const month = r['Month'] || '';
+  const year = String(r['Year'] || '');
+  const slLabel = month ? `${month.slice(0, 3)} ${year} #${sl}` : `SL #${sl}`;
+  
+  const pageInput = form.querySelector('[name="page_name"]');
+  const adInput = form.querySelector('[name="ad_account"]');
+  const idInput = form.querySelector('#idNameInput') || form.querySelector('[name="id_name"]');
+  const statusSelect = form.querySelector('[name="status"]');
+  const typeSelect = form.querySelector('[name="types"]');
+  const startInput = form.querySelector('[name="start_date"]');
+  const dayInput = form.querySelector('[name="day"]');
+  const budgetInput = form.querySelector('[name="budget"]');
+
+  if (pageInput) {
+    pageInput.value = r['Page Name'] || '';
+    handlePageNameLookup(r['Page Name'] || '', { skipTypeOverride: true, selectedSL: sl });
+  }
+  if (adInput) adInput.value = r['AD Account'] || '';
+  if (idInput) idInput.value = r['ID Name'] || '';
+  if (statusSelect) statusSelect.value = r['Status'] || 'Old Page';
+  if (typeSelect) typeSelect.value = 'Increase';
+  if (startInput && inputDateVal) {
+    startInput.value = inputDateVal;
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (dayInput) dayInput.value = '1';
+  if (budgetInput) budgetInput.value = r['Budget'] || '10';
+
+  if (window.updateCampaignCalc) window.updateCampaignCalc();
+
+  card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card?.classList.add('pulse-highlight');
+  setTimeout(() => card?.classList.remove('pulse-highlight'), 1400);
+
+  showToast(`⚡ Increasing campaign [${slLabel}]. Start date set to ${formattedEndDate || inputDateVal}`, 'success');
+}
+
+function quickIncreaseCampaignByIndex(idx) {
+  const records = state.currentRenderedRecords || state.filteredRecords || state.rawRecords || [];
+  const r = records[idx];
+  if (r) quickIncreaseCampaign(r);
+}
+
+function cloneCampaignRecord(r) {
+  if (!r) return;
+
+  const card = document.getElementById('entryCard');
+  if (card) card.classList.remove('hidden');
+
+  renderEntryForm();
+
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+
+  const pageName = r['Page Name'] || r['page_name'] || r['Page'] || '';
+  const adAccount = r['AD Account'] || r['ad_account'] || '';
+  const idName = r['ID Name'] || r['id_name'] || '';
+  const status = r['Status'] || r['status'] || 'Old Page';
+  const types = r['Types'] || r['types'] || 'Boost';
+  const day = r['Day'] || r['day'] || '1';
+  const budget = r['Budget'] || r['budget'] || '10';
+  const rate = r['Rate'] || r['rate'] || state.rate || '140';
+  const offUsd = r['OFF USD'] || r['off_usd'] || '0';
+  const todayStr = getTodayLocalDateStr();
+
+  const pageInput = form.querySelector('#pageNameInput') || form.querySelector('[name="page_name"]');
+  const adInput = form.querySelector('#adAccountInput') || form.querySelector('[name="ad_account"]');
+  const idInput = form.querySelector('#idNameInput') || form.querySelector('[name="id_name"]');
+  const statusSelect = form.querySelector('#statusSelect') || form.querySelector('[name="status"]');
+  const typeSelect = form.querySelector('#typesSelect') || form.querySelector('[name="types"]');
+  const startInput = form.querySelector('[name="start_date"]');
+  const dayInput = form.querySelector('[name="day"]');
+  const budgetInput = form.querySelector('[name="budget"]');
+  const rateInput = form.querySelector('[name="rate"]');
+  const offInput = form.querySelector('[name="off_usd"]');
+
+  if (pageInput) {
+    pageInput.value = pageName;
+    handlePageNameLookup(pageName, { skipTypeOverride: true });
+  }
+  if (adInput && adAccount) adInput.value = adAccount;
+  if (idInput && idName) idInput.value = idName;
+  if (statusSelect && status) statusSelect.value = status;
+  if (typeSelect && types) typeSelect.value = types;
+  if (startInput) {
+    startInput.value = todayStr;
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (dayInput) dayInput.value = day;
+  if (budgetInput) budgetInput.value = budget;
+  if (rateInput && rate) rateInput.value = rate;
+  if (offInput && offUsd) offInput.value = offUsd;
+
+  if (window.updateCampaignCalc) window.updateCampaignCalc();
+
+  card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card?.classList.add('pulse-highlight');
+  setTimeout(() => card?.classList.remove('pulse-highlight'), 1400);
+
+  const sl = r['SL'] || r['sl_no'] || '';
+  const slLabel = sl ? ` #${sl}` : '';
+  showToast(`📋 Cloned campaign [${pageName || 'Record'}${slLabel}]. Pre-filled and ready to save!`, 'success');
+}
+
+function cloneCampaignRecordByIndex(idx) {
+  const records = state.currentRenderedRecords || [];
+  const r = records[idx];
+  if (r) {
+    cloneCampaignRecord(r);
+  }
+}
+
+// Smart Page Profile Lookup (AD Account, Most Used Type, Old/New Status, and Active Campaigns)
+function handlePageNameLookup(pageName, opts = {}) {
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+
+  const cleanName = String(pageName || '').trim();
+  const statusSelect = form.querySelector('[name="status"]');
+  const adInput = form.querySelector('#adAccountInput') || form.querySelector('[name="ad_account"]');
+  const idInput = form.querySelector('#idNameInput') || form.querySelector('[name="id_name"]');
+  const typeSelect = form.querySelector('#typesSelect') || form.querySelector('[name="types"]');
+  const startInput = form.querySelector('[name="start_date"]');
+  const noticeEl = form.querySelector('#increaseSmartNotice');
+
+  if (!cleanName) {
+    if (noticeEl) noticeEl.style.display = 'none';
+    return;
+  }
+
+  // 1. Instant Synchronous check from local state.rawRecords / state.pages
+  const knownInList = state.pages && state.pages.some(p => p.toLowerCase() === cleanName.toLowerCase());
+  const localMatching = (state.rawRecords || []).filter(r => 
+    String(r['Page Name'] || '').trim().toLowerCase() === cleanName.toLowerCase()
+  );
+
+  if (statusSelect) {
+    statusSelect.value = (knownInList || localMatching.length > 0) ? 'Old Page' : 'New Page';
+  }
+
+  // 2. Fetch full deep profile from server across all historical months
+  google.script.run.withSuccessHandler(profile => {
+    if (!profile || !profile.success) return;
+
+    // Apply Old / New Page status
+    if (statusSelect) {
+      statusSelect.value = profile.status || (profile.exists ? 'Old Page' : 'New Page');
+    }
+
+    // Auto-fill most used AD Account & ID Name (unless user already typed something custom)
+    if (profile.mostFrequentAdAccount && adInput && (!adInput.value || adInput.value === state.adAccounts[0]?.a)) {
+      adInput.value = profile.mostFrequentAdAccount;
+      if (idInput && profile.mostFrequentIdName) {
+        idInput.value = profile.mostFrequentIdName;
+      }
+    }
+
+    // Auto-fill most used Type (unless skipTypeOverride is requested or type is Increase)
+    if (!opts.skipTypeOverride && typeSelect && typeSelect.value !== 'Increase' && profile.mostFrequentType) {
+      typeSelect.value = profile.mostFrequentType;
+    }
+
+    // Render Smart Increase Notice / Campaign Selector
+    if (!noticeEl) return;
+
+    if (profile.campaigns && profile.campaigns.length > 0) {
+      state.currentProfileCampaigns = profile.campaigns;
+      noticeEl.style.display = 'flex';
+      const campaigns = profile.campaigns;
+      const latest = profile.latestCampaign || campaigns[0];
+      const latestEndDate = latest?.end || '';
+      const latestEndInputVal = latest?.endInputVal || toInputDateValue(latestEndDate);
+
+      noticeEl.innerHTML = `
+        <div class="increase-smart-notice-header">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="ms" style="font-size:16px;color:var(--wrn)">analytics</span>
+            <b>Page Profile:</b>
+            <span class="page-profile-tag ${profile.exists ? 'old' : 'new'}">${profile.status}</span>
+            <span style="font-size:11.5px;color:var(--txt-muted)">(${campaigns.length} past campaign${campaigns.length > 1 ? 's' : ''})</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--txt-muted)">
+            Most used AD: <b>${escapeHtml(profile.mostFrequentAdAccount || 'N/A')}</b> | Default Type: <b>${escapeHtml(profile.mostFrequentType || 'Boost')}</b>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;flex-wrap:wrap;gap:4px">
+          <span style="font-size:12px;font-weight:700;color:var(--txt)">
+            ${campaigns.length > 1 ? 'Select which Campaign to Increase (by SL / Month):' : 'Active Campaign Details:'}
+          </span>
+          ${latestEndDate ? `
+            <button type="button" class="btn btn-secondary" style="padding:2px 8px;font-size:11px;font-weight:800" onclick="applyIncreaseStartDate('${escapeHtml(latestEndInputVal || latestEndDate)}')">
+              ⚡ Quick Set Start = Latest End (${escapeHtml(latestEndDate)})
+            </button>
+          ` : ''}
+        </div>
+        <div class="campaign-selector-grid">
+          ${campaigns.slice(0, 8).map((c, cIdx) => `
+            <button type="button" class="campaign-select-btn ${(opts.selectedSL && String(c.sl) === String(opts.selectedSL)) ? 'active' : ''}" onclick="applyIncreaseCampaignByIndex(${cIdx})" title="Increase this campaign">
+              <span class="ms" style="font-size:13px;color:var(--wrn)">trending_up</span>
+              <span><b>${escapeHtml(c.slLabel)}</b> | Ends: <b>${escapeHtml(c.end)}</b> | $${escapeHtml(String(c.budget))} | ${escapeHtml(c.adAccount)}</span>
+              ${c.isActive ? `<span style="background:rgba(16,185,129,0.15);color:var(--suc);padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700">Active</span>` : ''}
+            </button>
+          `).join('')}
+        </div>
+      `;
+
+      // If in Increase mode and not explicitly choosing another, set Start Date to latest end date
+      if (typeSelect?.value === 'Increase' && startInput && latestEndInputVal && !opts.skipTypeOverride) {
+        startInput.value = latestEndInputVal;
+        startInput.dispatchEvent(new Event('input', { bubbles: true }));
+        startInput.dispatchEvent(new Event('change', { bubbles: true }));
+        if (window.updateCampaignCalc) window.updateCampaignCalc();
+      }
+    } else {
+      noticeEl.style.display = 'flex';
+      noticeEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="ms" style="font-size:16px;color:var(--suc)">fiber_new</span>
+          <span><b>New Page</b> detected (${escapeHtml(cleanName)}). No past campaigns found. Status auto-set to <b>New Page</b>.</span>
+        </div>
+      `;
+    }
+  }).getPageProfile(cleanName);
+}
+
+function renderEntryForm() {
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+  form.innerHTML = '';
+  const todayStr = getTodayLocalDateStr();
+  const key = state.currentMenu.key;
+
+  if (key === 'today_created_campaign' || key === 'campaign') {
+    const defaultAd = state.adAccounts[0]?.a || '';
+    const defaultId = state.adAccounts[0]?.id || '';
+
+    form.innerHTML = `
+      <div id="increaseSmartNotice" class="increase-smart-notice" style="display:none"></div>
+      <div class="form-field"><label>SL No</label><input type="text" name="sl_no" readonly value="Loading..."></div>
+      <div class="form-field"><label>OFF $</label><input type="number" name="off_usd" value="0"></div>
+      <div class="form-field">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <label style="margin:0">AD Account * (Type 1-2 letters)</label>
+          <button type="button" onclick="openAdAccountsPagesModal('ad_accounts')" style="background:transparent;border:none;color:var(--pri);font-size:11px;font-weight:800;cursor:pointer;padding:0;text-decoration:underline">+ Manage / Add</button>
+        </div>
+        <div class="smart-autocomplete-wrap" id="adAccountWrap">
+          <input type="text" name="ad_account" id="adAccountInput" value="${escapeHtml(defaultAd)}" placeholder="Type to search AD Account..." autocomplete="off" required>
+          <div class="smart-suggestions-dropdown hidden" id="adAccountsDropdown"></div>
+        </div>
+      </div>
+      <div class="form-field"><label>ID Name</label><input type="text" name="id_name" id="idNameInput" value="${escapeHtml(defaultId)}" placeholder="Auto-filled from AD Account"></div>
+      <div class="form-field"><label>Status</label><select name="status" id="statusSelect"><option value="Old Page">Old Page</option><option value="New Page">New Page</option></select></div>
+      <div class="form-field">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <label style="margin:0">Page Name * (বাংলা / Banglish ড্রপডাউন)</label>
+          <button type="button" onclick="openAdAccountsPagesModal('pages')" style="background:transparent;border:none;color:var(--pri);font-size:11px;font-weight:800;cursor:pointer;padding:0;text-decoration:underline">+ Manage / Add</button>
+        </div>
+        <div class="smart-autocomplete-wrap" id="pageNameWrap">
+          <input type="text" name="page_name" id="pageNameInput" placeholder="Type 1-2 letters (e.g. 'tuktak' or 'টুকটাক')..." autocomplete="off" required>
+          <div class="smart-suggestions-dropdown hidden" id="pageSuggestionsDropdown"></div>
+        </div>
+      </div>
+      <div class="form-field"><label>Start Date *</label><input type="date" name="start_date" value="${todayStr}" required></div>
+      <div class="form-field"><label>End Date</label><input type="date" name="end_date" readonly></div>
+      <div class="form-field"><label>Types</label><select name="types" id="typesSelect"><option value="Boost">Boost</option><option value="Ad Campaign">Ad Campaign</option><option value="Increase">Increase</option><option value="Others">Others</option></select></div>
+      <div class="form-field"><label>Day *</label><input type="number" name="day" min="1" value="1" required></div>
+      <div class="form-field"><label>Budget ($) *</label><input type="number" name="budget" min="1" step="any" value="10" required></div>
+      <div class="form-field"><label>Rate (৳)</label><input type="number" name="rate" value="${state.rate || 140}"></div>
+      <div class="form-field"><label>Taka (৳)</label><input type="text" name="taka" readonly></div>
+      <div class="form-field" style="grid-column: 1 / -1">
+        <div class="multi-campaign-wrap" style="padding:10px;background:var(--card-elevated);border-radius:var(--radius-sm);border:1px dashed var(--bor)">
+          <button type="button" class="btn btn-secondary" onclick="addMultipleCampaignRow()" style="font-size:11.5px">＋ Add Multiple Sub-Campaigns</button>
+          <div id="multipleCampaignRows" style="margin-top:8px"></div>
+        </div>
+      </div>
+    `;
+
+    google.script.run.withSuccessHandler(res => {
+      const slInput = form.querySelector('[name="sl_no"]');
+      if (slInput && res.success) slInput.value = res.nextSL;
+    }).getNextSLNo(state.filters.month, state.filters.year);
+
+    // Auto-match AD Account & Sync ID Name instantly on 1-2 letters with smart dropdown
+    const adInput = form.querySelector('#adAccountInput');
+    const adDropdown = form.querySelector('#adAccountsDropdown');
+    const idInput = form.querySelector('#idNameInput');
+    
+    initSmartAdAccountAutocomplete(adInput, adDropdown, {
+      onSelect: (selectedAd, selectedId) => {
+        if (idInput && selectedId) idInput.value = selectedId;
+      }
+    });
+
+    const syncAdAndId = () => {
+      const val = (adInput?.value || '').trim().toLowerCase();
+      if (!val) return;
+      const matched = state.adAccounts.find(a => 
+        a.a.toLowerCase() === val ||
+        a.a.toLowerCase().startsWith(val) ||
+        a.a.toLowerCase().includes(val) ||
+        a.id.toLowerCase().includes(val)
+      );
+      if (matched && idInput) {
+        idInput.value = matched.id;
+      }
+    };
+    adInput?.addEventListener('input', syncAdAndId);
+
+    // Intelligent Page Name Selection with Banglish Phonetic Dropdown & History Lookup
+    const pageInput = form.querySelector('#pageNameInput');
+    const pageDropdown = form.querySelector('#pageSuggestionsDropdown');
+    const typeSelect = form.querySelector('#typesSelect');
+
+    let debounceTimer = null;
+    const triggerPageLookup = (val) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        handlePageNameLookup(val || pageInput?.value || '');
+      }, 150);
+    };
+
+    initSmartPageAutocomplete(pageInput, pageDropdown, {
+      onSelect: (selectedPage) => {
+        triggerPageLookup(selectedPage);
+      }
+    });
+
+    pageInput?.addEventListener('input', () => triggerPageLookup());
+    pageInput?.addEventListener('change', () => triggerPageLookup());
+
+    typeSelect?.addEventListener('change', () => {
+      const startEl = form.querySelector('[name="start_date"]');
+      if (typeSelect.value === 'Increase') {
+        handlePageNameLookup(pageInput?.value || '');
+      } else {
+        // Ensure Start Date resets to today's date for standard campaigns
+        if (startEl && !startEl.value) {
+          startEl.value = getTodayLocalDateStr();
+        }
+      }
+      updateCampaignCalc();
+    });
+
+    const updateCampaignCalc = () => {
+      const day = parseFloat(form.querySelector('[name="day"]')?.value) || 0;
+      const budget = parseFloat(form.querySelector('[name="budget"]')?.value) || 0;
+      const rate = parseFloat(form.querySelector('[name="rate"]')?.value) || 140;
+      const start = form.querySelector('[name="start_date"]')?.value || getTodayLocalDateStr();
+      const endEl = form.querySelector('[name="end_date"]');
+      const takaEl = form.querySelector('[name="taka"]');
+
+      if (start && day > 0 && endEl) {
+        const d = parseAnyDate(start);
+        if (d && !isNaN(d.getTime())) {
+          const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + day);
+          endEl.value = toInputDateValue(end);
+        }
+      }
+      if (takaEl) takaEl.value = (budget * rate).toFixed(2);
+    };
+
+    window.updateCampaignCalc = updateCampaignCalc;
+    form.querySelectorAll('input, select').forEach(el => el.addEventListener('input', updateCampaignCalc));
+    updateCampaignCalc();
+  } else if (key === 'new_pages') {
+    form.innerHTML = `
+      <div class="form-field"><label>Date</label><input type="date" name="date" value="${todayStr}"></div>
+      <div class="form-field"><label>SL NO *</label><input type="text" name="sl_no" placeholder="Enter Campaign SL" required></div>
+      <div class="form-field"><label>Page Name</label><input type="text" name="page_name" readonly></div>
+      <div class="form-field"><label>Budget ($)</label><input type="number" name="budget" readonly></div>
+      <div class="form-field"><label>Spent ($) *</label><input type="number" name="spent" step="any" required></div>
+      <div class="form-field"><label>Remaining ($)</label><input type="number" name="remaining" readonly></div>
+    `;
+    const slInput = form.querySelector('[name="sl_no"]');
+    const spentInput = form.querySelector('[name="spent"]');
+    if (slInput) {
+      slInput.addEventListener('change', () => {
+        google.script.run.withSuccessHandler(res => {
+          if (res.success) {
+            form.querySelector('[name="page_name"]').value = res.pageName;
+            form.querySelector('[name="budget"]').value = res.budget;
+            const spent = parseFloat(spentInput?.value) || 0;
+            form.querySelector('[name="remaining"]').value = (res.budget - spent).toFixed(2);
+          } else showToast('Campaign SL not found', 'error');
+        }).getCampaignBySL(slInput.value);
+      });
+    }
+  } else if (key === 'scam') {
+    form.innerHTML = `
+      <div class="form-field"><label>Date</label><input type="date" name="date" value="${todayStr}"></div>
+      <div class="form-field"><label>SL NO *</label><input type="text" name="sl_no" placeholder="Enter Campaign SL" required></div>
+      <div class="form-field"><label>Page Name</label><input type="text" name="page_name" readonly></div>
+      <div class="form-field"><label>Spent ($) *</label><input type="number" name="spent" step="any" required></div>
+    `;
+  } else if (key === 'agency_cost') {
+    form.innerHTML = `
+      <div class="form-field"><label>Type *</label><input type="text" name="type" placeholder="e.g. Office Rent / Facebook Ad Bill" required></div>
+      <div class="form-field"><label>Cost (৳) *</label><input type="number" name="cost" step="any" required></div>
+      <div class="form-field"><label>Status</label><select name="status"><option value="Due">Due</option><option value="Paid">Paid</option></select></div>
+    `;
+  }
+}
+
+function saveEntry() {
+  if (state.saving) return;
+  if (!isAdmin()) { showToast('Only Admins can add entries.', 'error'); return; }
+  const form = document.getElementById('entryForm');
+  if (!form) return;
+  const fd = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
+  data.month = state.filters.month;
+  data.year = state.filters.year;
+
+  const extraRows = Array.from(form.querySelectorAll('.multi-campaign-row'));
+  const batchItems = [];
+  if (extraRows.length) {
+    batchItems.push({ day: Number(data.day), budget: Number(data.budget), start_date: data.start_date });
+    for (const row of extraRows) {
+      const day = Number(row.querySelector('.multi-campaign-day')?.value);
+      const budget = Number(row.querySelector('.multi-campaign-budget')?.value);
+      if (day > 0 && budget >= 0) {
+        batchItems.push({ day, budget, start_date: data.start_date });
+      }
+    }
+  }
+
+  state.saving = true;
+  const btn = document.getElementById('btnSaveEntry');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  const callback = res => {
+    state.saving = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Campaign'; }
+    if (res && res.success) {
+      // Auto-copy newly saved campaign details to clipboard
+      const savedItems = (res.saved && res.saved.length)
+        ? res.saved.map(s => s.record || s)
+        : (res.records && res.records.length ? res.records : [res.record || data]);
+
+      state.lastSavedCampaigns = savedItems;
+
+      if (savedItems.length > 1) {
+        const allFormattedTexts = savedItems.map(r => formatCampaignText(r)).filter(Boolean);
+        const combinedText = allFormattedTexts.join('\n');
+        copyCampaignRecord(combinedText);
+        showToast(`📋 ${savedItems.length} campaigns saved & all copied to clipboard! (Each separated)`, 'success');
+      } else {
+        copyCampaignRecord(res.record || data);
+        showToast('Entry saved & copied to clipboard! 📋', 'success');
+      }
+
+      state.cacheTimestamps = {}; // Invalidate cache without wiping UI
+      renderEntryForm();
+      renderSavedCampaignsNotice(savedItems);
+      loadMenuData();
+    } else {
+      showToast(res?.message || 'Save failed', 'error');
+    }
+  };
+
+  const errorHandler = err => {
+    state.saving = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Campaign'; }
+    showToast(err?.message || 'Failed to save entry. Please retry.', 'error');
+  };
+
+  if (batchItems.length) {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler).addCampaignBatch(data, batchItems);
+  } else if (state.currentMenu.key === 'new_pages') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler).addPauseAds(data);
+  } else if (state.currentMenu.key === 'scam') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler).addScam(data);
+  } else if (state.currentMenu.key === 'agency_cost') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler).addAgencyCost(data);
+  } else {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler).addCampaign(data);
+  }
+}
+
+function addMultipleCampaignRow() {
+  const box = document.getElementById('multipleCampaignRows');
+  if (!box) return;
+  const row = document.createElement('div');
+  row.className = 'multi-campaign-row';
+  row.style.cssText = 'display:flex;gap:10px;align-items:center;margin-top:6px';
+  row.innerHTML = `
+    <div class="form-field" style="flex:1"><label>Day *</label><input type="number" class="multi-campaign-day" min="1" value="1" required></div>
+    <div class="form-field" style="flex:1"><label>Budget ($) *</label><input type="number" class="multi-campaign-budget" min="1" step="any" value="10" required></div>
+    <button type="button" class="btn btn-secondary" style="margin-top:auto;padding:8px 12px;color:var(--dan)" onclick="this.parentElement.remove()">✕</button>
+  `;
+  box.appendChild(row);
+}
+
+// Payment Actions
+function addPaymentRecord() {
+  const date = document.getElementById('payDate')?.value;
+  const method = document.getElementById('payMethod')?.value;
+  const amount = document.getElementById('payAmount')?.value;
+  if (!date || !method || !amount) {
+    showToast('Please fill all payment fields', 'error');
+    return;
+  }
+  google.script.run.withSuccessHandler(res => {
+    if (res && res.success) {
+      showToast('Payment recorded successfully!', 'success');
+      document.getElementById('payAmount').value = '';
+      state.cacheTimestamps = {};
+      loadMenuData();
+    }
+  }).addPayment({ date, payment_method: method, paid_amount: amount, month: state.filters.month, year: state.filters.year });
+}
+
+function deletePaymentItem(recordId) {
+  if (!confirm('Are you sure you want to delete this payment?')) return;
+  google.script.run.withSuccessHandler(res => {
+    if (res && res.success) {
+      showToast('Payment deleted', 'success');
+      state.cacheTimestamps = {};
+      loadMenuData();
+    }
+  }).deletePayment(recordId);
+}
+
+function deleteRecordByIndex(idx) {
+  const row = state.currentRenderedRecords && state.currentRenderedRecords[idx];
+  if (!row) return;
+  const id = row['Record ID'] || row._recordId || row._row || row.SL;
+  deleteRecordItem(id, row);
+}
+
+function deleteRecordItem(id, row) {
+  if (!confirm('Are you sure you want to delete this record?')) return;
+  const key = state.currentMenu ? state.currentMenu.key : 'campaign';
+  state.cacheTimestamps = {};
+  const month = (row && (row.Month || row.month)) || state.filters.month;
+  const year = (row && (row.Year || row.year)) || state.filters.year;
+
+  const callback = res => {
+    if (res && res.success === false) {
+      showToast(res.message || 'Delete failed', 'error');
+    } else {
+      showToast('Record deleted successfully!', 'success');
+      loadMenuData();
+    }
+  };
+  const errorHandler = err => {
+    showToast(err?.message || 'Failed to delete record', 'error');
+  };
+
+  if (key === 'campaign' || key === 'today_created_campaign' || key === 'today_created') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deleteCampaignRecord(id, month, year);
+  } else if (key === 'new_pages') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deletePauseAds(id);
+  } else if (key === 'scam') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deleteScam(id);
+  } else if (key === 'agency_cost') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deleteAgencyCost(id);
+  } else if (key === 'agency_spending' || key === 'payment_due_tracker') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deletePayment(id);
+  } else {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .deleteCampaignRecord(id, month, year);
+  }
+}
+
+function openEditRecordByIndex(idx) {
+  const row = state.currentRenderedRecords && state.currentRenderedRecords[idx];
+  if (!row) return;
+  openEditRecord(row);
+}
+
+function openEditRecord(row) {
+  if (!row) return;
+  state.editingRow = row;
+  state.editingId = row['Record ID'] || row._recordId || row._row || row.SL;
+  
+  const titleEl = document.getElementById('modalTitle');
+  if (titleEl) {
+    const pageName = row['Page Name'] || row.Page || row['Ad Account'] || '';
+    titleEl.textContent = `Edit Record ${pageName ? '– ' + pageName : ''}`;
+  }
+
+  const form = document.getElementById('recordForm');
+  if (!form) return;
+
+  const fields = Object.entries(row).filter(([k]) => !k.startsWith('_'));
+
+  form.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px">
+      ${fields.map(([k, v]) => {
+        const val = v === undefined || v === null ? '' : String(v);
+        const lower = k.toLowerCase();
+        let inputType = 'text';
+        if (lower.includes('budget') || lower.includes('taka') || lower.includes('cost') || lower.includes('paid') || lower.includes('spent') || lower.includes('rate') || lower === 'day') {
+          inputType = 'number';
+        }
+        return `
+          <div class="form-field">
+            <label style="font-size:11.5px;font-weight:700;color:var(--txt-muted);text-transform:uppercase">${escapeHtml(k)}</label>
+            <input type="${inputType}" step="any" name="${escapeHtml(k)}" value="${escapeHtml(val)}" class="form-control" style="width:100%;padding:8px 10px;background:var(--input-bg);border:1px solid var(--bor);border-radius:var(--radius-sm);color:var(--txt)">
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  const modalOverlay = document.getElementById('modalOverlay');
+  if (modalOverlay) modalOverlay.classList.remove('hidden');
+}
+
+function closeModal() {
+  const modalOverlay = document.getElementById('modalOverlay');
+  if (modalOverlay) modalOverlay.classList.add('hidden');
+  state.editingRow = null;
+  state.editingId = null;
+}
+
+function saveModalRecord() {
+  const form = document.getElementById('recordForm');
+  if (!form) return;
+  const fd = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
+  
+  const originalRow = state.editingRow || {};
+  const month = data.Month || data.month || originalRow.Month || originalRow.month || state.filters.month;
+  const year = data.Year || data.year || originalRow.Year || originalRow.year || state.filters.year;
+  data.month = month;
+  data.year = year;
+  data.Month = month;
+  data.Year = year;
+
+  const key = state.currentMenu ? state.currentMenu.key : 'campaign';
+  const saveBtn = document.getElementById('btnSaveRecord');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+  }
+
+  const callback = res => {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+    if (res && res.success === false) {
+      showToast(res.message || 'Update failed', 'error');
+    } else {
+      showToast('Record updated successfully!', 'success');
+      closeModal();
+      state.cacheTimestamps = {};
+      loadMenuData();
+    }
+  };
+
+  const errorHandler = err => {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+    showToast(err?.message || 'Failed to update record', 'error');
+  };
+
+  if (key === 'new_pages') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .updatePauseAds(state.editingId, data);
+  } else if (key === 'scam') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .updateScam(state.editingId, data);
+  } else if (key === 'agency_cost') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .updateAgencyCost(state.editingId, data);
+  } else if (key === 'agency_spending' || key === 'payment_due_tracker') {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .updatePayment(state.editingId, data);
+  } else {
+    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
+      .updateCampaignRecord(state.editingId, data);
+  }
+}
+
+// Google Sheet Data Hub
+function updateGoogleAuthUI() {
+  const token = getGoogleAccessToken();
+  const email = localStorage.getItem('adverse_google_user_email');
+  const name = localStorage.getItem('adverse_google_user_name');
+  const label = document.getElementById('googleAuthAccountLabel');
+  const btnIn = document.getElementById('btnGoogleSignIn');
+  const btnOut = document.getElementById('btnGoogleSignOut');
+
+  if (token) {
+    if (label) {
+      label.innerHTML = `<span style="color:#10b981;font-weight:700">Connected:</span> ${email || name || 'Google Account'} <span class="pill pill-green" style="font-size:10px;padding:1px 6px;margin-left:4px">OAuth Active</span>`;
+    }
+    if (btnIn) btnIn.classList.add('hidden');
+    if (btnOut) btnOut.classList.remove('hidden');
+  } else {
+    if (label) {
+      label.innerHTML = `<span style="color:var(--txt-muted)">Not Connected.</span> Sign in to access your private sheets.`;
+    }
+    if (btnIn) {
+      btnIn.classList.remove('hidden');
+      btnIn.innerHTML = `<span class="ms" style="font-size:16px">login</span> Connect Google Account`;
+    }
+    if (btnOut) btnOut.classList.add('hidden');
+  }
+}
+
+async function handleGoogleSignIn() {
+  const btnIn = document.getElementById('btnGoogleSignIn');
+  if (btnIn) {
+    btnIn.disabled = true;
+    btnIn.innerHTML = '<span class="ms" style="font-size:16px">hourglass_empty</span> Signing in...';
+  }
+  try {
+    const res = await googleSignIn();
+    if (res && res.accessToken) {
+      showToast(`Signed in as ${res.user.email || 'Google User'}!`, 'success');
+      updateGoogleAuthUI();
+      // If Sheet ID is filled, refresh connection status
+      const sheetId = document.getElementById('sheetIdInput')?.value.trim();
+      if (sheetId) {
+        saveSheetConfig();
+      }
+    }
+  } catch (err) {
+    console.error('Sign-in error:', err);
+    showToast(err?.message || 'Google Sign-in failed', 'error');
+  } finally {
+    if (btnIn) {
+      btnIn.disabled = false;
+      btnIn.innerHTML = `<span class="ms" style="font-size:16px">login</span> Connect Google Account`;
+    }
+  }
+}
+
+async function handleGoogleSignOut() {
+  try {
+    await googleSignOut();
+    showToast('Signed out from Google Account', 'info');
+    updateGoogleAuthUI();
+  } catch (err) {
+    showToast(err?.message || 'Failed to sign out', 'error');
+  }
+}
+
+function updateHeaderSheetStatus(connected, sheetId) {
+  const dot = document.getElementById('headerLiveDot');
+  const label = document.getElementById('headerSheetLabel');
+  if (dot) dot.className = `live-dot ${connected ? '' : 'disconnected'}`;
+  if (label) label.textContent = connected ? 'Live Sheet Sync' : 'Sheet Hub';
+}
+
+function switchHubTab(tabId) {
+  document.querySelectorAll('.hub-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.hub-panel').forEach(p => p.classList.add('hidden'));
+  const targetPanel = document.getElementById(tabId);
+  if (targetPanel) targetPanel.classList.remove('hidden');
+  const matchingBtn = Array.from(document.querySelectorAll('.hub-tab')).find(b => b.getAttribute('onclick')?.includes(tabId));
+  if (matchingBtn) matchingBtn.classList.add('active');
+}
+
+function openLiveDiagnosticsModal() {
+  const overlay = document.getElementById('diagnosticsModalOverlay');
+  if (overlay) overlay.classList.remove('hidden');
+  runDiagnosticsCheck();
+}
+window.openLiveDiagnosticsModal = openLiveDiagnosticsModal;
+
+function closeDiagnosticsModal() {
+  const overlay = document.getElementById('diagnosticsModalOverlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+window.closeDiagnosticsModal = closeDiagnosticsModal;
+
+function runDiagnosticsCheck() {
+  const loading = document.getElementById('diagnosticsLoading');
+  const content = document.getElementById('diagnosticsContent');
+  if (loading) loading.classList.remove('hidden');
+  if (content) content.classList.add('hidden');
+
+  const m = state.filters.month && state.filters.month !== 'All' ? state.filters.month : 'October';
+  const y = state.filters.year && state.filters.year !== 'All' ? String(state.filters.year) : '2026';
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.success) {
+        showToast('Diagnostics could not be run: ' + (res?.message || 'Unknown error'), 'error');
+        return;
+      }
+      if (loading) loading.classList.add('hidden');
+      if (content) content.classList.remove('hidden');
+
+      const vc = res.verificationChain || {};
+      const sd = res.sheetDetails || {};
+
+      const banner = document.getElementById('diagStatusBanner');
+      const icon = document.getElementById('diagStatusIcon');
+      const title = document.getElementById('diagStatusTitle');
+      const desc = document.getElementById('diagStatusDesc');
+      if (banner && icon && title && desc) {
+        if (vc.isExactMatch) {
+          banner.style.background = 'rgba(16, 185, 129, 0.12)';
+          banner.style.border = '1px solid rgba(16, 185, 129, 0.35)';
+          banner.style.color = 'var(--suc)';
+          icon.textContent = 'verified';
+          title.textContent = '100% Data Parity Verified — Google Sheets & Web App Match Exactly';
+          desc.textContent = vc.explanation || 'All physical campaign rows match across Google Sheets, backend memory, and frontend display.';
+        } else {
+          banner.style.background = 'rgba(239, 68, 68, 0.12)';
+          banner.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+          banner.style.color = 'var(--dan)';
+          icon.textContent = 'warning';
+          title.textContent = 'Data Discrepancy Detected';
+          desc.textContent = vc.explanation || 'Row counts differ between Google Sheet and web application.';
+        }
+      }
+
+      const elSheet = document.getElementById('diagChainSheet');
+      const elMem = document.getElementById('diagChainMemory');
+      const elRpc = document.getElementById('diagChainRpc');
+      const elFront = document.getElementById('diagChainFrontend');
+      const elRend = document.getElementById('diagChainRendered');
+      const elDash = document.getElementById('diagChainDashboard');
+
+      const curRaw = (state.rawRecords || []).length;
+      const curFiltered = (state.filteredRecords || []).length;
+      const curStatRecords = (state.stats && state.stats.totalRecords !== undefined) ? state.stats.totalRecords : curFiltered;
+
+      if (elSheet) elSheet.textContent = vc.googleSheetsPhysicalRows || 0;
+      if (elMem) elMem.textContent = vc.backendResponseRows || 0;
+      if (elRpc) elRpc.textContent = vc.backendResponseRows || 0;
+      if (elFront) elFront.textContent = curRaw;
+      if (elRend) elRend.textContent = curFiltered;
+      if (elDash) elDash.textContent = curStatRecords;
+
+      const elId = document.getElementById('diagSheetId');
+      const elWs = document.getElementById('diagWorksheetName');
+      const elFirst = document.getElementById('diagFirstRow');
+      const elLast = document.getElementById('diagLastRow');
+      const elTotal = document.getElementById('diagAllMonthsTotal');
+
+      if (elId) elId.textContent = res.spreadsheetId || 'Active Spreadsheet';
+      if (elWs) elWs.textContent = res.targetWorksheet || '';
+      if (elFirst) {
+        const fr = sd.firstDataRow;
+        elFirst.textContent = fr ? `SL ${fr.SL} • ${fr['Page Name']}` : 'N/A';
+      }
+      if (elLast) {
+        const lr = sd.lastDataRow;
+        elLast.textContent = lr ? `SL ${lr.SL} • ${lr['Page Name']}` : 'N/A';
+      }
+      if (elTotal) elTotal.textContent = `${vc.allMonthsCampaignsTotal || 0} Campaigns`;
+
+      const elValid = document.getElementById('diagValidCount');
+      const elBlank = document.getElementById('diagBlankCount');
+      const elMal = document.getElementById('diagMalformedCount');
+      const elDupSL = document.getElementById('diagDupSLCount');
+      const elDupId = document.getElementById('diagDupIdCount');
+
+      if (elValid) elValid.textContent = sd.validCampaignRecordCount || 0;
+      if (elBlank) elBlank.textContent = sd.blankRowCount || 0;
+      if (elMal) elMal.textContent = sd.malformedRowCount || 0;
+      if (elDupSL) {
+        const dCount = (sd.duplicateSLs || []).length;
+        const dNames = (sd.duplicateSLs || []).map(x => `SL ${x.sl} (×${x.count})`).join(', ');
+        elDupSL.textContent = dCount > 0 ? `${dCount} [${dNames}]` : '0';
+      }
+      if (elDupId) {
+        const dIdCount = (sd.duplicateRecordIds || []).length;
+        elDupId.textContent = dIdCount > 0 ? `${dIdCount} Duplicate UUIDs preserved` : '0';
+      }
+    })
+    .withFailureHandler(err => {
+      if (loading) loading.classList.add('hidden');
+      showToast('Error running diagnostics: ' + (err?.message || err), 'error');
+    })
+    .runDiagnosticsReport(m, y);
+}
+window.runDiagnosticsCheck = runDiagnosticsCheck;
+
+function openSheetConfigModal() {
+  updateGoogleAuthUI();
+  google.script.run.withSuccessHandler(res => {
+    document.getElementById('sheetIdInput').value = res.sheetId || '';
+    const webhookInput = document.getElementById('webhookUrlInput');
+    if (webhookInput) webhookInput.value = res.webhookUrl || '';
+    
+    const isConn = !!res.connected;
+    document.getElementById('sheetStatusBadge').textContent = isConn ? 'Live Connected ✅' : 'Not Connected ⚠️';
+    document.getElementById('sheetStatusBadge').className = `pill ${isConn ? 'pill-green' : 'pill-orange'}`;
+    const hubText = document.getElementById('hubStatusText');
+    if (hubText) {
+      hubText.textContent = isConn ? `Connected to Sheet ID: ${res.sheetId}` : 'Ready to connect your Google Sheet';
+    }
+    updateHeaderSheetStatus(isConn, res.sheetId);
+
+    const mSelect = document.getElementById('importMonthSelect');
+    const ySelect = document.getElementById('importYearSelect');
+    if (mSelect && state.months) {
+      mSelect.innerHTML = state.months.map(m => `<option value="${m}">${m}</option>`).join('');
+      mSelect.value = state.filters.month || state.months[new Date().getMonth()];
+    }
+    if (ySelect) {
+      const cy = new Date().getFullYear();
+      ySelect.innerHTML = [cy - 1, cy, cy + 1].map(y => `<option value="${y}">${y}</option>`).join('');
+      ySelect.value = state.filters.year || String(cy);
+    }
+
+    google.script.run.withSuccessHandler(codeRes => {
+      const area = document.getElementById('appsScriptCodeArea');
+      if (area && codeRes?.scriptCode) area.value = codeRes.scriptCode;
+    }).getAppsScriptCode();
+
+    document.getElementById('sheetConfigOverlay')?.classList.remove('hidden');
+  }).getSheetConfig();
+}
+
+function closeSheetConfigModal() {
+  document.getElementById('sheetConfigOverlay')?.classList.add('hidden');
+}
+
+function saveSheetConfig() {
+  const sheetId = document.getElementById('sheetIdInput').value.trim();
+  const webhookUrl = document.getElementById('webhookUrlInput')?.value.trim() || '';
+  const btn = document.getElementById('btnSaveSheetConfig');
+  btn.disabled = true; btn.textContent = 'Connecting...';
+
+  google.script.run.withSuccessHandler(res => {
+    btn.disabled = false; btn.textContent = 'Save Sheet ID';
+    showToast(res.message, res.connected ? 'success' : 'info');
+    updateHeaderSheetStatus(res.connected, res.sheetId);
+    state.cacheTimestamps = {};
+    if (res.connected) {
+      setTimeout(() => {
+        closeSheetConfigModal();
+        initializeApp();
+      }, 800);
+    }
+  }).updateSheetConfig(sheetId, webhookUrl);
+}
+
+function testWebhookConnection() {
+  const webhookUrl = document.getElementById('webhookUrlInput')?.value.trim() || '';
+  if (!webhookUrl) {
+    showToast('⚠️ আগে Webhook URL বক্সে আপনার Apps Script URL দিন', 'warning');
+    return;
+  }
+  showToast('Testing webhook connection...', 'info');
+  google.script.run.withSuccessHandler(res => {
+    showToast(res.message, res.success ? 'success' : 'error');
+  }).withFailureHandler(err => {
+    showToast(err?.message || 'Webhook failed to connect', 'error');
+  }).testWebhook(webhookUrl);
+}
+
+async function pushAllDataToGoogleSheet() {
+  const webhookUrl = document.getElementById('webhookUrlInput')?.value.trim() || '';
+  const rawSheetInput = document.getElementById('sheetIdInput')?.value.trim() || '';
+  const btn = document.getElementById('btnPushAllData');
+  const resultBox = document.getElementById('syncResultBox');
+
+  // Extract ID from full URL if provided
+  let sheetId = rawSheetInput;
+  const match = rawSheetInput.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) sheetId = match[1];
+
+  if (!sheetId) {
+    showToast('অনুগ্রহ করে আগে Google Spreadsheet URL বা Sheet ID দিন', 'error');
+    return;
+  }
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="ms" style="font-size:18px">hourglass_top</span> Saving all data to Sheet...';
+  }
+
+  // Check if we have client-side OAuth access token
+  const oauthToken = getGoogleAccessToken();
+
+  if (oauthToken) {
+    try {
+      showToast('গুগল অ্যাকাউন্ট ক্রেডেনশিয়াল ব্যবহার করে সরাসরি শিটে সেভ হচ্ছে...', 'info');
+      // 1. Get all sheets formatted rows from backend
+      const allDataRes = await cloudRpc('getAllSheetsData', []);
+      const allSheetsData = allDataRes?.allSheetsData || {};
+
+      // 2. Push directly to Google Sheets using user's token
+      const pushResult = await pushAllSheetsDataDirect(sheetId, allSheetsData);
+      
+      // 3. Update sheet config on server
+      await cloudRpc('updateSheetConfig', [sheetId, webhookUrl]);
+      updateHeaderSheetStatus(true, sheetId);
+
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="ms" style="font-size:18px">cloud_upload</span> Push All Data to Google Sheet (সব ডাটা শিটে সেভ করুন)';
+      }
+      showToast(pushResult.message, 'success');
+
+      if (resultBox) {
+        resultBox.innerHTML = `
+          <div style="font-size:13px;font-weight:800;margin-bottom:4px">✅ ${pushResult.message}</div>
+          <div style="font-size:11.5px">গুগল শিট চেক করুন, মোট <b>${pushResult.count}</b> টি শিটের সব ডাটা সরাসরি সেভ হয়ে গেছে!</div>
+        `;
+        resultBox.classList.remove('hidden');
+      }
+      return;
+    } catch (clientErr) {
+      console.warn('Direct OAuth push failed, falling back to Webhook/Backend push:', clientErr);
+    }
+  }
+
+  // Fallback to Webhook or Backend RPC push
+  google.script.run.withSuccessHandler(() => {
+    google.script.run.withSuccessHandler(res => {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="ms" style="font-size:18px">cloud_upload</span> Push All Data to Google Sheet (সব ডাটা শিটে সেভ করুন)';
+      }
+      showToast(res.message, res.success ? 'success' : 'error');
+      if (resultBox && res.success) {
+        resultBox.innerHTML = `
+          <div style="font-size:13px;font-weight:800;margin-bottom:4px">${res.message}</div>
+          <div style="font-size:11.5px">গুগল শিট চেক করুন, সব ডাটা শিটে আপডেট হয়ে গেছে।</div>
+        `;
+        resultBox.classList.remove('hidden');
+      }
+    }).withFailureHandler(err => {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="ms" style="font-size:18px">cloud_upload</span> Push All Data to Google Sheet (সব ডাটা শিটে সেভ করুন)';
+      }
+      showToast(err?.message || 'Push failed. Please sign in with Google or provide Webhook URL.', 'error');
+    }).pushAllDataToSheetViaWebhook(webhookUrl);
+  }).updateSheetConfig(sheetId, webhookUrl);
+}
+
+async function syncSpreadsheetData() {
+  const sheetInput = document.getElementById('sheetIdInput').value.trim();
+  const webhookUrl = document.getElementById('webhookUrlInput')?.value.trim() || '';
+  const btn = document.getElementById('btnSyncAllData');
+  const resultBox = document.getElementById('syncResultBox');
+
+  // Extract ID from full URL if provided
+  let sheetId = sheetInput;
+  const match = sheetInput.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) sheetId = match[1];
+
+  if (!sheetId) {
+    showToast('অনুগ্রহ করে Google Spreadsheet URL বা Sheet ID দিন', 'error');
+    return;
+  }
+
+  btn.disabled = true; btn.innerHTML = 'Fetching All Data...';
+
+  // Also store webhookUrl & sheetId
+  google.script.run.updateSheetConfig(sheetId, webhookUrl);
+
+  const oauthToken = getGoogleAccessToken();
+
+  // Try direct client-side fetch if user is signed in with Google
+  if (oauthToken) {
+    try {
+      showToast('গুগল অ্যাকাউন্ট থেকে শিটের সমস্ত ডাটা ফেচ করা হচ্ছে...', 'info');
+      const directData = await fetchAllSpreadsheetData(sheetId);
+      
+      if (directData && directData.sheetsData && Object.keys(directData.sheetsData).length > 0) {
+        // Send fetched payload to server to ingest into the local database
+        const ingestRes = await cloudRpc('syncFromAppsScriptPayload', [sheetId, directData.sheetsData]);
+        
+        btn.disabled = false;
+        btn.innerHTML = '<span class="ms" style="font-size:18px">download</span> Fetch & Sync from Sheet (ডাটা আনুন)';
+        showToast(ingestRes?.message || 'Google Sheet synced successfully!', 'success');
+        updateHeaderSheetStatus(true, sheetId);
+
+        if (resultBox) {
+          resultBox.innerHTML = `
+            <div style="font-size:13px;font-weight:800;margin-bottom:4px">✅ ${ingestRes?.message || 'Data Synced!'}</div>
+            <div style="font-size:11.5px">
+              <b>Spreadsheet:</b> ${directData.title || sheetId}<br>
+              <b>Sheets Found:</b> ${Object.keys(directData.sheetsData).join(', ')}
+            </div>
+          `;
+          resultBox.classList.remove('hidden');
+        }
+        state.cacheTimestamps = {};
+        loadAppData();
+        return;
+      }
+    } catch (err) {
+      console.warn('Direct OAuth fetch failed, falling back to GViz/AppsScript backend sync:', err);
+    }
+  }
+
+  // Backend sync fallback
+  google.script.run.withSuccessHandler(res => {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="ms" style="font-size:18px">download</span> Fetch & Sync from Sheet (ডাটা আনুন)';
+    if (res && res.success) {
+      showToast(res.message || 'Data synced successfully!', 'success');
+      updateHeaderSheetStatus(true, res.sheetId);
+      if (resultBox) {
+        resultBox.innerHTML = `
+          <div style="font-size:13px;font-weight:800;margin-bottom:4px">✅ ${res.message}</div>
+          <div style="font-size:11.5px">
+            <b>Sheets Found:</b> ${res.sheetTitles?.join(', ') || 'All Sheets'}<br>
+            <b>Campaigns:</b> ${res.campaignsCount} | <b>Payments:</b> ${res.paymentsCount} | <b>Pages:</b> ${res.pagesCount}
+          </div>
+        `;
+        resultBox.classList.remove('hidden');
+      }
+      state.cacheTimestamps = {};
+      loadAppData();
+    } else {
+      showToast(res?.message || 'Sync error. Please sign in with Google or verify sheet access.', 'error');
+    }
+  }).withFailureHandler(err => {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="ms" style="font-size:18px">download</span> Fetch & Sync from Sheet (ডাটা আনুন)';
+    showToast(err?.message || 'Network error', 'error');
+  }).syncSpreadsheet(sheetId);
+}
+
+function clearAllDatabaseData() {
+  if (!isAdmin()) {
+    showToast('Admin access required to clear database data', 'error');
+    return;
+  }
+  
+  const confirmed = window.confirm('⚠️ Are you sure you want to completely clear all database records? This will remove all local/demo records so you can sync freshly from your Google Sheet.');
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btnClearAllDataBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="ms" style="font-size:17px">hourglass_empty</span> Clearing...';
+  }
+
+  google.script.run.withSuccessHandler(res => {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="ms" style="font-size:17px">delete_sweep</span> Clear All Data (সব ডিলিট/খালি করুন)';
+    }
+    if (res && res.success) {
+      showToast(res.message || 'All records have been cleared!', 'success');
+      state.clientCache = {};
+      state.rawRecords = [];
+      state.filteredRecords = [];
+      state.pages = [];
+      state.adAccounts = [];
+      const resultBox = document.getElementById('syncResultBox');
+      if (resultBox) {
+        resultBox.innerHTML = '🧹 Database is completely empty and ready for Google Sheet Sync.';
+        resultBox.classList.remove('hidden');
+      }
+      loadAppData();
+    } else {
+      showToast(res?.message || 'Failed to clear data', 'error');
+    }
+  }).withFailureHandler(err => {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="ms" style="font-size:17px">delete_sweep</span> Clear All Data (সব ডিলিট/খালি করুন)';
+    }
+    showToast(err?.message || 'Error clearing data', 'error');
+  }).clearAllData();
+}
+
+function executeRawImport() {
+  const target = document.getElementById('importTargetCategory')?.value || 'campaign';
+  const month = document.getElementById('importMonthSelect')?.value;
+  const year = document.getElementById('importYearSelect')?.value;
+  const text = document.getElementById('importRawTextarea')?.value || '';
+  const btn = document.getElementById('btnExecuteImport');
+
+  if (!text.trim()) {
+    showToast('Please paste data rows to import', 'error');
+    return;
+  }
+  btn.disabled = true; btn.innerHTML = 'Importing Records...';
+
+  google.script.run.withSuccessHandler(res => {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="ms" style="font-size:18px">file_upload</span> Import & Save Records';
+    if (res && res.success) {
+      showToast(res.message, 'success');
+      document.getElementById('importRawTextarea').value = '';
+      closeSheetConfigModal();
+      state.cacheTimestamps = {};
+      loadAppData();
+    } else {
+      showToast(res?.message || 'Import failed', 'error');
+    }
+  }).withFailureHandler(err => {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="ms" style="font-size:18px">file_upload</span> Import & Save Records';
+    showToast(err?.message || 'Import error', 'error');
+  }).importCsvData(target, text, month, year);
+}
+
+function copyAppsScriptCode() {
+  const area = document.getElementById('appsScriptCodeArea');
+  if (!area) return;
+  area.select();
+  navigator.clipboard.writeText(area.value).then(() => {
+    showToast('Apps Script Code copied!', 'success');
+  });
+}
+
+// Visual Analytics Modal
+function openAnalyticsModal() {
+  const modal = document.getElementById('analyticsOverlay');
+  const body = document.getElementById('analyticsModalBody');
+  if (!modal || !body) return;
+  modal.classList.remove('hidden');
+
+  google.script.run.withSuccessHandler(res => {
+    if (!res || !res.success) {
+      body.innerHTML = '<div style="color:var(--dan)">Failed to load agency analytics</div>';
+      return;
+    }
+    const a = res.analytics;
+    const maxSpend = Math.max(...(a.monthlyTrend || []).map(m => m.spend), 100);
+
+    body.innerHTML = `
+      <!-- KPI Top Grid -->
+      <div class="stats-compact" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+        <div class="stat-card stat-purple">
+          <div class="stat-header"><div class="stat-label">Total Spend ($)</div><span class="ms" style="color:var(--pri)">paid</span></div>
+          <div class="stat-value">$${fmtNum(a.totalSpendUSD)}</div>
+          <div class="stat-sub">${a.totalCampaigns} Campaigns</div>
+        </div>
+        <div class="stat-card stat-blue">
+          <div class="stat-header"><div class="stat-label">Total Invoiced</div><span class="ms" style="color:var(--sec)">receipt_long</span></div>
+          <div class="stat-value">৳${fmtNum(a.totalTakaBilled)}</div>
+          <div class="stat-sub">Client Billing</div>
+        </div>
+        <div class="stat-card stat-green">
+          <div class="stat-header"><div class="stat-label">Collections</div><span class="ms" style="color:var(--suc)">payments</span></div>
+          <div class="stat-value">৳${fmtNum(a.totalPaymentsReceived)}</div>
+          <div class="stat-sub">Paid in Bank/MFS</div>
+        </div>
+        <div class="stat-card stat-red">
+          <div class="stat-header"><div class="stat-label">Pending Due</div><span class="ms" style="color:var(--dan)">account_balance_wallet</span></div>
+          <div class="stat-value">৳${fmtNum(a.outstandingDue)}</div>
+          <div class="stat-sub">Unpaid Client Balances</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="analytics-grid">
+        <!-- Monthly Ad Spend Bar Chart -->
+        <div class="chart-card">
+          <div class="chart-title"><span class="ms" style="color:var(--pri)">bar_chart</span> Monthly Ad Spend ($)</div>
+          <div class="bar-chart-container">
+            ${(a.monthlyTrend || []).map(m => {
+              const h = Math.round((m.spend / maxSpend) * 100);
+              return `
+                <div class="bar-column" title="${m.month}: $${fmtNum(m.spend)}">
+                  <div style="font-size:10px;font-weight:700;color:var(--pri)">$${Math.round(m.spend)}</div>
+                  <div class="bar-fill" style="height:${Math.max(h, 4)}%"></div>
+                  <div class="bar-label">${m.month.slice(0, 3)}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Top Pages Leaderboard -->
+        <div class="chart-card">
+          <div class="chart-title"><span class="ms" style="color:var(--sec)">leaderboard</span> Top Performing Pages</div>
+          <div style="display:flex;flex-direction:column;gap:10px;max-height:160px;overflow-y:auto">
+            ${(a.topPages || []).slice(0, 5).map(p => `
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:3px">
+                  <span>${escapeHtml(p.pageName)}</span>
+                  <span style="color:var(--pri)">$${fmtNum(p.totalBudget)}</span>
+                </div>
+                <div style="height:6px;background:var(--bor);border-radius:4px;overflow:hidden">
+                  <div style="height:100%;width:${Math.min(100, Math.round((p.totalBudget / (a.topPages[0]?.totalBudget || 1)) * 100))}%;background:var(--gb)"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }).getAgencyAnalytics();
+}
+
+function closeAnalyticsModal() {
+  document.getElementById('analyticsOverlay')?.classList.add('hidden');
+}
+
+// WhatsApp Notice Generator
+function openWhatsAppModal(presetRecord = null) {
+  const modal = document.getElementById('whatsappOverlay');
+  const select = document.getElementById('waCampaignSelect');
+  if (!modal || !select) return;
+
+  const activeRecords = state.filteredRecords.length ? state.filteredRecords : state.rawRecords;
+  select.innerHTML = activeRecords.map((r, idx) => `
+    <option value="${idx}" ${presetRecord && presetRecord['Page Name'] === r['Page Name'] ? 'selected' : ''}>
+      ${escapeHtml(r['Page Name'] || 'Unknown')} - $${fmtNum(r['Budget'])} (${r['Start Date'] || 'Today'})
+    </option>
+  `).join('') || '<option value="">No campaigns found</option>';
+
+  modal.classList.remove('hidden');
+  generateWhatsAppNotice();
+}
+
+function openSingleRecordWhatsApp(record) {
+  openWhatsAppModal(record);
+}
+
+function openSingleRecordWhatsAppByIndex(idx) {
+  const records = state.currentRenderedRecords || state.filteredRecords || state.rawRecords || [];
+  const r = records[idx];
+  if (r) openSingleRecordWhatsApp(r);
+}
+
+function generateWhatsAppNotice() {
+  const select = document.getElementById('waCampaignSelect');
+  const lang = document.getElementById('waLanguageSelect')?.value || 'bn';
+  const textarea = document.getElementById('waMessageText');
+  if (!select || !textarea) return;
+
+  const idx = parseInt(select.value, 10);
+  const activeRecords = state.filteredRecords.length ? state.filteredRecords : state.rawRecords;
+  const r = activeRecords[idx] || {};
+
+  const pageName = r['Page Name'] || 'Your Page';
+  const budget = r['Budget'] || '0';
+  const taka = r['Taka'] || (parseFloat(budget) * (state.rate || 140)).toFixed(0);
+  const start = r['Start Date'] || new Date().toISOString().slice(0, 10);
+  const end = r['End Date'] || '-';
+  const days = r['Day'] || '1';
+  const type = r['Types'] || 'Boost';
+
+  let msg = '';
+  if (lang === 'bn') {
+    msg = `*🚀 AdVerse Agency - ক্যাম্পেইন অ্যাক্টিভেশন নোটিশ*\n\n` +
+          `প্রিয় ক্লায়েন্ট, আপনার পেজের বিজ্ঞাপন সফলভাবে চালু করা হয়েছে:\n\n` +
+          `📌 *Page Name:* ${pageName}\n` +
+          `🎯 *Type:* ${type}\n` +
+          `💵 *Daily/Total Budget:* $${budget} (৳${taka})\n` +
+          `📅 *Start Date:* ${start}\n` +
+          `🏁 *End Date:* ${end} (${days} দিন)\n` +
+          `⚡ *Status:* Active / Running\n\n` +
+          `যে কোন জিজ্ঞাসা বা সাপোর্টের জন্য আমাদের জানান। ধন্যবাদ! 🤝`;
+  } else {
+    msg = `*🚀 Campaign Confirmation - AdVerse Agency*\n\n` +
+          `Dear Client, your ad campaign is now live:\n\n` +
+          `• *Page:* ${pageName}\n` +
+          `• *Ad Type:* ${type}\n` +
+          `• *Budget:* $${budget} (৳${taka})\n` +
+          `• *Duration:* ${start} to ${end} (${days} Days)\n` +
+          `• *Status:* Active & Running\n\n` +
+          `Thank you for choosing AdVerse Agency!`;
+  }
+
+  textarea.value = msg;
+}
+
+function copyWhatsAppNotice() {
+  const textarea = document.getElementById('waMessageText');
+  if (!textarea) return;
+  textarea.select();
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    showToast('WhatsApp notice copied!', 'success');
+    closeWhatsAppModal();
+  });
+}
+
+function closeWhatsAppModal() {
+  document.getElementById('whatsappOverlay')?.classList.add('hidden');
+}
+
+// CSV Export
+function exportCurrentTableCSV() {
+  const headers = state.headers.length ? state.headers : ['SL', 'AD Account', 'Status', 'Page Name', 'Start Date', 'End Date', 'Types', 'Day', 'Budget', 'Rate', 'Taka'];
+  const records = state.filteredRecords.length ? state.filteredRecords : state.rawRecords;
+  if (!records.length) {
+    showToast('No records to export', 'error');
+    return;
+  }
+
+  let csv = headers.join(',') + '\n';
+  records.forEach(r => {
+    const row = headers.map(h => {
+      let val = String(r[h] ?? '').replace(/"/g, '""');
+      return `"${val}"`;
+    });
+    csv += row.join(',') + '\n';
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `AdVerse_${state.currentMenu?.key || 'Export'}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Table exported to CSV!', 'success');
+}
+
+// Command Palette (Cmd + K)
+const cmdPaletteItems = [
+  { title: 'Today Created Campaign', icon: 'today', action: () => selectMenu('today_created_campaign') },
+  { title: 'All Campaigns', icon: 'campaign', action: () => selectMenu('campaign') },
+  { title: 'End Ads (Ending Today / Tomorrow)', icon: 'event_busy', action: () => selectMenu('end_ads') },
+  { title: 'Payment History & Dues', icon: 'account_balance_wallet', action: () => selectMenu('payment_due_tracker') },
+  { title: 'Agency Spending & Calculation', icon: 'payments', action: () => selectMenu('agency_spending') },
+  { title: 'Agency Costs & Rent', icon: 'receipt_long', action: () => selectMenu('agency_cost') },
+  { title: 'Page Summary & ROI', icon: 'analytics', action: () => selectMenu('page_summery') },
+  { title: 'Open Visual Analytics & Intelligence', icon: 'analytics', action: openAnalyticsModal },
+  { title: 'WhatsApp Client Notice Generator', icon: 'chat', action: () => openWhatsAppModal() },
+  { title: 'Google Sheet Sync & Import Hub', icon: 'table_chart', action: openSheetConfigModal },
+  { title: 'Clear / Reset All Database Records', icon: 'delete_sweep', action: clearAllDatabaseData },
+  { title: 'Toggle Light / Dark Theme', icon: 'brightness_6', action: toggleTheme },
+  { title: 'Admin & Viewer Access Links', icon: 'link', action: openRoleLinksModal }
+];
+
+function openCmdPalette() {
+  const overlay = document.getElementById('cmdPaletteOverlay');
+  const input = document.getElementById('cmdPaletteInput');
+  if (overlay && input) {
+    overlay.classList.remove('hidden');
+    input.value = '';
+    renderCmdList(cmdPaletteItems);
+    input.focus();
+  }
+}
+
+function closeCmdPalette() {
+  document.getElementById('cmdPaletteOverlay')?.classList.add('hidden');
+}
+
+function handleCmdSearch(q) {
+  const query = q.trim().toLowerCase();
+  const filtered = query
+    ? cmdPaletteItems.filter(i => i.title.toLowerCase().includes(query))
+    : cmdPaletteItems;
+  renderCmdList(filtered);
+}
+
+function renderCmdList(items) {
+  const list = document.getElementById('cmdList');
+  if (!list) return;
+  list.innerHTML = items.map((item, idx) => `
+    <div class="cmd-item" onclick="executeCmdItem(${idx})">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="ms" style="color:var(--pri)">${item.icon}</span>
+        <span>${escapeHtml(item.title)}</span>
+      </div>
+      <span class="ms" style="font-size:16px;opacity:0.5">arrow_forward</span>
+    </div>
+  `).join('') || '<div style="padding:16px;text-align:center;color:var(--txt-dim)">No commands found</div>';
+}
+
+function executeCmdItem(idx) {
+  const items = cmdPaletteItems;
+  if (items[idx]) {
+    closeCmdPalette();
+    items[idx].action();
+  }
+}
+
+// Keyboard Shortcut Listener
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    const overlay = document.getElementById('cmdPaletteOverlay');
+    if (overlay?.classList.contains('hidden')) openCmdPalette();
+    else closeCmdPalette();
+  }
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.campaign-dropdown').forEach(d => d.classList.remove('open'));
+    closeCmdPalette();
+    closeModal();
+    closeAnalyticsModal();
+    closeWhatsAppModal();
+    closeSheetConfigModal();
+    closeRoleLinksModal();
+  }
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.campaign-dropdown')) {
+    document.querySelectorAll('.campaign-dropdown').forEach(d => d.classList.remove('open'));
+  }
+  if (!e.target.closest('.theme-select-wrap')) {
+    document.getElementById('themeDropdownMenu')?.classList.remove('open');
+  }
+});
+
+// Setup DOM Events
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('pinLoginBtn')?.addEventListener('click', submitPinLogin);
+  document.getElementById('pinLoginInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') submitPinLogin(); });
+  document.getElementById('btnSaveEntry')?.addEventListener('click', saveEntry);
+  document.getElementById('btnResetEntry')?.addEventListener('click', renderEntryForm);
+  document.getElementById('btnAddPayment')?.addEventListener('click', addPaymentRecord);
+  document.getElementById('btnSaveRecord')?.addEventListener('click', saveModalRecord);
+  document.getElementById('btnApplyFilters')?.addEventListener('click', () => {
+    state.filters.month = document.getElementById('filterMonth').value;
+    state.filters.year = document.getElementById('filterYear').value;
+    state.filters.date = document.getElementById('filterDate')?.value || '';
+    state.filters.pageType = document.getElementById('pageTypeFilter')?.value || '';
+    loadMenuData();
+  });
+
+  initializeApp();
+  initGoogleAuth();
+  updateGoogleAuthUI();
+});
+
+// Ad Accounts & Pages Manager Functions
+let currentManagerTab = 'ad_accounts';
+let adAccountsFilterQuery = '';
+let pagesFilterQuery = '';
+
+function openAdAccountsPagesModal(initialTab = 'ad_accounts') {
+  const overlay = document.getElementById('adAccountsPagesOverlay');
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    switchManagerTab(initialTab);
+    loadManagerData();
+  }
+}
+
+function closeAdAccountsPagesModal() {
+  document.getElementById('adAccountsPagesOverlay')?.classList.add('hidden');
+}
+
+function switchManagerTab(tab) {
+  currentManagerTab = tab;
+  const tabAd = document.getElementById('managerTabAdAccounts');
+  const tabPg = document.getElementById('managerTabPages');
+  const tabGd = document.getElementById('managerTabGuide');
+
+  const btnAd = document.getElementById('tabBtnAdAccounts');
+  const btnPg = document.getElementById('tabBtnPages');
+  const btnGd = document.getElementById('tabBtnGuide');
+
+  tabAd?.classList.toggle('hidden', tab !== 'ad_accounts');
+  tabPg?.classList.toggle('hidden', tab !== 'pages');
+  tabGd?.classList.toggle('hidden', tab !== 'guide');
+
+  btnAd?.classList.toggle('active', tab === 'ad_accounts');
+  btnPg?.classList.toggle('active', tab === 'pages');
+  btnGd?.classList.toggle('active', tab === 'guide');
+
+  if (btnAd) btnAd.style.borderBottom = tab === 'ad_accounts' ? '2px solid var(--pri)' : 'none';
+  if (btnPg) btnPg.style.borderBottom = tab === 'pages' ? '2px solid var(--pri)' : 'none';
+  if (btnGd) btnGd.style.borderBottom = tab === 'guide' ? '2px solid var(--pri)' : 'none';
+}
+
+function loadManagerData() {
+  const countAd = document.getElementById('countAdAccounts');
+  const countPg = document.getElementById('countPages');
+  if (countAd) countAd.textContent = String(state.adAccounts.length);
+  if (countPg) countPg.textContent = String(state.pages.length);
+
+  renderAdAccountsTable();
+  renderPagesTable();
+}
+
+function renderAdAccountsTable() {
+  const tbody = document.getElementById('adAccountsTableBody');
+  if (!tbody) return;
+
+  const query = adAccountsFilterQuery.toLowerCase().trim();
+  const list = query
+    ? state.adAccounts.filter(a => a.a.toLowerCase().includes(query) || (a.id && a.id.toLowerCase().includes(query)))
+    : state.adAccounts;
+
+  const countAd = document.getElementById('countAdAccounts');
+  if (countAd) countAd.textContent = String(state.adAccounts.length);
+
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;color:var(--txt-muted)">কোনো AD Account পাওয়া যায়নি। নতুন যুক্ত করতে উপরের ফর্ম বা বাল্ক পেস্ট ব্যবহার করুন।</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map(item => `
+    <tr style="border-bottom:1px solid var(--bor)">
+      <td style="padding:10px 12px;font-weight:700;color:var(--txt)">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="ms" style="font-size:16px;color:var(--pri)">badge</span>
+          ${escapeHtml(item.a)}
+        </div>
+      </td>
+      <td style="padding:10px 12px;color:var(--txt-muted);font-family:monospace;font-size:12px">
+        ${escapeHtml(item.id || '—')}
+      </td>
+      <td style="padding:10px 12px;text-align:right">
+        <button class="table-btn table-btn-danger" type="button" onclick="deleteAdAccountItem('${escapeHtml(item.a)}')" title="Delete Account">
+          <span class="ms" style="font-size:15px">delete</span>
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderPagesTable() {
+  const tbody = document.getElementById('pagesTableBody');
+  if (!tbody) return;
+
+  const query = pagesFilterQuery.trim();
+  const list = query
+    ? state.pages.filter(p => BanglishEngine.matches(p, query))
+    : state.pages;
+
+  const countPg = document.getElementById('countPages');
+  if (countPg) countPg.textContent = String(state.pages.length);
+
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;color:var(--txt-muted)">কোনো Page Name পাওয়া যায়নি। নতুন যুক্ত করতে উপরের ফর্ম বা বাল্ক পেস্ট ব্যবহার করুন।</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map((p, idx) => `
+    <tr style="border-bottom:1px solid var(--bor)">
+      <td style="padding:10px 12px;color:var(--txt-dim);width:40px">${idx + 1}</td>
+      <td style="padding:10px 12px;font-weight:700;color:var(--txt)">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="ms" style="font-size:16px;color:var(--suc)">pages</span>
+          ${escapeHtml(p)}
+        </div>
+      </td>
+      <td style="padding:10px 12px;text-align:right">
+        <button class="table-btn table-btn-danger" type="button" onclick="deletePageItem('${escapeHtml(p)}')" title="Delete Page">
+          <span class="ms" style="font-size:15px">delete</span>
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterAdAccountsList(val) {
+  adAccountsFilterQuery = val;
+  renderAdAccountsTable();
+}
+
+function filterPagesList(val) {
+  pagesFilterQuery = val;
+  renderPagesTable();
+}
+
+function submitNewAdAccount() {
+  const nameInput = document.getElementById('newAdAccountName');
+  const idInput = document.getElementById('newAdAccountId');
+  const a = (nameInput?.value || '').trim();
+  const id = (idInput?.value || '').trim();
+
+  if (!a) {
+    showToast('অনুগ্রহ করে AD Account এর নাম লিখুন!', 'error');
+    return;
+  }
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.adAccounts) state.adAccounts = res.adAccounts;
+    else if (!state.adAccounts.some(x => x.a.toLowerCase() === a.toLowerCase())) {
+      state.adAccounts.push({ a, id });
+    }
+    if (nameInput) nameInput.value = '';
+    if (idInput) idInput.value = '';
+    showToast(`AD Account "${a}" সফলভাবে সেভ হয়েছে!`, 'success');
+    renderAdAccountsTable();
+    updateFormDatalists();
+  }).addAdAccount(a, id);
+}
+
+function submitBulkAdAccounts() {
+  const area = document.getElementById('bulkAdAccountsInput');
+  const text = (area?.value || '').trim();
+  if (!text) {
+    showToast('অনুগ্রহ করে পেস্ট বক্সে AD Account এর তালিকা লিখুন!', 'error');
+    return;
+  }
+
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const items = [];
+  for (const line of lines) {
+    const parts = line.split(/[,;\t]/).map(p => p.trim());
+    const a = parts[0];
+    const id = parts.slice(1).join(' ');
+    if (a) items.push({ a, id });
+  }
+
+  if (!items.length) {
+    showToast('সঠিক ফরম্যাটে ডাটা দিন!', 'error');
+    return;
+  }
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.adAccounts) state.adAccounts = res.adAccounts;
+    else {
+      items.forEach(it => {
+        if (!state.adAccounts.some(x => x.a.toLowerCase() === it.a.toLowerCase())) {
+          state.adAccounts.push(it);
+        }
+      });
+    }
+    if (area) area.value = '';
+    showToast(`${items.length} টি AD Account সফলভাবে ইমপোর্ট হয়েছে!`, 'success');
+    renderAdAccountsTable();
+    updateFormDatalists();
+  }).addBulkAdAccounts(items);
+}
+
+function deleteAdAccountItem(name) {
+  if (!confirm(`AD Account "${name}" মুছে ফেলতে চান?`)) return;
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.adAccounts) state.adAccounts = res.adAccounts;
+    else state.adAccounts = state.adAccounts.filter(x => x.a.toLowerCase() !== name.toLowerCase());
+    showToast(`AD Account "${name}" মুছে ফেলা হয়েছে।`, 'info');
+    renderAdAccountsTable();
+    updateFormDatalists();
+  }).deleteAdAccount(name);
+}
+
+function submitNewPageName() {
+  const pageInput = document.getElementById('newPageNameInput');
+  const p = (pageInput?.value || '').trim();
+
+  if (!p) {
+    showToast('অনুগ্রহ করে Page এর নাম লিখুন!', 'error');
+    return;
+  }
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.pages) state.pages = res.pages;
+    else if (!state.pages.some(x => x.toLowerCase() === p.toLowerCase())) {
+      state.pages.push(p);
+    }
+    if (pageInput) pageInput.value = '';
+    showToast(`Page "${p}" সফলভাবে সেভ হয়েছে!`, 'success');
+    renderPagesTable();
+    updateFormDatalists();
+  }).addPage(p);
+}
+
+function submitBulkPages() {
+  const area = document.getElementById('bulkPagesInput');
+  const text = (area?.value || '').trim();
+  if (!text) {
+    showToast('অনুগ্রহ করে পেস্ট বক্সে Page এর তালিকা লিখুন!', 'error');
+    return;
+  }
+
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const pages = [...new Set(lines)];
+
+  if (!pages.length) {
+    showToast('সঠিক ফরম্যাটে পেজ নাম দিন!', 'error');
+    return;
+  }
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.pages) state.pages = res.pages;
+    else {
+      pages.forEach(p => {
+        if (!state.pages.some(x => x.toLowerCase() === p.toLowerCase())) {
+          state.pages.push(p);
+        }
+      });
+    }
+    if (area) area.value = '';
+    showToast(`${pages.length} টি Page সফলভাবে ইমপোর্ট হয়েছে!`, 'success');
+    renderPagesTable();
+    updateFormDatalists();
+  }).addBulkPages(pages);
+}
+
+function deletePageItem(name) {
+  if (!confirm(`Page "${name}" মুছে ফেলতে চান?`)) return;
+
+  google.script.run.withSuccessHandler(res => {
+    if (res.pages) state.pages = res.pages;
+    else state.pages = state.pages.filter(p => p.toLowerCase() !== name.toLowerCase());
+    showToast(`Page "${name}" মুছে ফেলা হয়েছে।`, 'info');
+    renderPagesTable();
+    updateFormDatalists();
+  }).deletePage(name);
+}
+
+function updateFormDatalists() {
+  const adDatalist = document.getElementById('adAccountsList');
+  if (adDatalist) {
+    adDatalist.innerHTML = state.adAccounts.map(a => `<option value="${escapeHtml(a.a)}" data-id="${escapeHtml(a.id)}">${escapeHtml(a.a)} — (${escapeHtml(a.id)})</option>`).join('');
+  }
+  const pgDatalist = document.getElementById('pagesList');
+  if (pgDatalist) {
+    pgDatalist.innerHTML = state.pages.map(p => `<option value="${escapeHtml(p)}">`).join('');
+  }
+}
+
+// Window Exports
+window.selectMenu = selectMenu;
+window.toggleEntryCard = toggleEntryCard;
+window.refreshCurrentView = refreshCurrentView;
+window.sortTableBy = sortTableBy;
+window.filterTableRows = filterTableRows;
+window.addMultipleCampaignRow = addMultipleCampaignRow;
+window.deletePaymentItem = deletePaymentItem;
+window.deleteRecordItem = deleteRecordItem;
+window.deleteRecordByIndex = deleteRecordByIndex;
+window.openEditRecord = openEditRecord;
+window.openEditRecordByIndex = openEditRecordByIndex;
+window.saveModalRecord = saveModalRecord;
+window.closeModal = closeModal;
+window.appLogout = appLogout;
+window.toggleTheme = toggleTheme;
+window.toggleThemeDropdown = toggleThemeDropdown;
+window.toggleSettingsDropdown = toggleSettingsDropdown;
+window.closeAllDropdowns = closeAllDropdowns;
+window.applyThemeStyle = applyThemeStyle;
+window.openRateModal = openRateModal;
+window.closeRateModal = closeRateModal;
+window.setQuickRate = setQuickRate;
+window.saveNewRate = saveNewRate;
+window.refreshFinancialHud = refreshFinancialHud;
+window.openCmdPalette = openCmdPalette;
+window.closeCmdPalette = closeCmdPalette;
+window.handleCmdSearch = handleCmdSearch;
+window.executeCmdItem = executeCmdItem;
+window.openAnalyticsModal = openAnalyticsModal;
+window.closeAnalyticsModal = closeAnalyticsModal;
+window.openWhatsAppModal = openWhatsAppModal;
+window.openSingleRecordWhatsApp = openSingleRecordWhatsApp;
+window.openSingleRecordWhatsAppByIndex = openSingleRecordWhatsAppByIndex;
+window.closeWhatsAppModal = closeWhatsAppModal;
+window.generateWhatsAppNotice = generateWhatsAppNotice;
+window.copyWhatsAppNotice = copyWhatsAppNotice;
+window.exportCurrentTableCSV = exportCurrentTableCSV;
+window.openSheetConfigModal = openSheetConfigModal;
+window.closeSheetConfigModal = closeSheetConfigModal;
+window.saveSheetConfig = saveSheetConfig;
+window.syncSpreadsheetData = syncSpreadsheetData;
+window.switchHubTab = switchHubTab;
+window.executeRawImport = executeRawImport;
+window.copyAppsScriptCode = copyAppsScriptCode;
+window.quickLogin = quickLogin;
+window.openRoleLinksModal = openRoleLinksModal;
+window.closeRoleLinksModal = closeRoleLinksModal;
+window.copyLink = copyLink;
+window.copyCampaignRecord = copyCampaignRecord;
+window.copyCampaignRecordByIndex = copyCampaignRecordByIndex;
+window.handleQuickCampaignPaste = handleQuickCampaignPaste;
+window.parseCampaignString = parseCampaignString;
+window.formatCampaignText = formatCampaignText;
+window.quickIncreaseCampaign = quickIncreaseCampaign;
+window.quickIncreaseCampaignByIndex = quickIncreaseCampaignByIndex;
+window.applyIncreaseStartDate = applyIncreaseStartDate;
+window.applyIncreaseCampaign = applyIncreaseCampaign;
+window.applyIncreaseCampaignByIndex = applyIncreaseCampaignByIndex;
+window.copyAllCurrentTableCampaigns = copyAllCurrentTableCampaigns;
+window.copyMultipleSavedCampaigns = copyMultipleSavedCampaigns;
+window.copySingleSavedCampaignByIndex = copySingleSavedCampaignByIndex;
+window.renderSavedCampaignsNotice = renderSavedCampaignsNotice;
+window.handlePageNameLookup = handlePageNameLookup;
+window.clearAllDatabaseData = clearAllDatabaseData;
+window.openAdAccountsPagesModal = openAdAccountsPagesModal;
+window.closeAdAccountsPagesModal = closeAdAccountsPagesModal;
+window.switchManagerTab = switchManagerTab;
+window.submitNewAdAccount = submitNewAdAccount;
+window.submitBulkAdAccounts = submitBulkAdAccounts;
+window.deleteAdAccountItem = deleteAdAccountItem;
+window.submitNewPageName = submitNewPageName;
+window.submitBulkPages = submitBulkPages;
+window.deletePageItem = deletePageItem;
+window.filterAdAccountsList = filterAdAccountsList;
+window.filterPagesList = filterPagesList;
+window.updateFormDatalists = updateFormDatalists;
+window.handleGoogleSignIn = handleGoogleSignIn;
+window.handleGoogleSignOut = handleGoogleSignOut;
+window.updateGoogleAuthUI = updateGoogleAuthUI;
+window.cloneCampaignRecord = cloneCampaignRecord;
+window.cloneCampaignRecordByIndex = cloneCampaignRecordByIndex;
+</script>

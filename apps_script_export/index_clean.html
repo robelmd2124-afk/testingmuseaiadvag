@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AdVerse Agency - Intelligence & Campaign Suite</title>
+  <meta name="description" content="Ultra-fast Agency Ad Management, Client Billing, and Google Sheets Live Sync Dashboard">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+  <?!= include('stylesheet'); ?>
+</head>
+<body>
+  <div class="app" id="appContainer">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand" onclick="selectMenu('today_created_campaign')">
+        <div class="brand-icon" style="padding:0;overflow:hidden;background:#2D323E;display:flex;align-items:center;justify-content:center;"><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20512%20512%22%20width%3D%22512%22%20height%3D%22512%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3C!--%20Background%20Radial%20Gradient%20(Charcoal%20slate%20with%20soft%20center%20spotlight)%20--%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22slateGlow%22%20cx%3D%2250%25%22%20cy%3D%2245%25%22%20r%3D%2265%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23404656%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%232D323E%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231B1E26%22%20%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%0A%20%20%20%20%3C!--%20Vibrant%20Red%203D%20Gradients%20--%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22redFront%22%20x1%3D%2220%25%22%20y1%3D%220%25%22%20x2%3D%2280%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FF385C%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2240%25%22%20stop-color%3D%22%23ED1C3F%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C70F30%22%20%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%0A%20%20%20%20%3C!--%20Highlight%20for%20top%2Fleft%20bevel%20edges%20--%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22redHighlight%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FFA8BA%22%20stop-opacity%3D%220.8%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23FF385C%22%20stop-opacity%3D%220.1%22%20%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%0A%20%20%20%20%3C!--%20Dark%20Shade%20for%203D%20bottom%2Fright%20extrusion%20bevels%20--%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22redShade%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23800618%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%234D020D%22%20%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%0A%20%20%20%20%3ClinearGradient%20id%3D%22stepGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FF476B%22%20%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23B80E28%22%20%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%0A%20%20%20%20%3C!--%20Soft%20Drop%20Shadow%20on%20Slate%20Canvas%20--%3E%0A%20%20%20%20%3Cfilter%20id%3D%22emblemDropShadow%22%20x%3D%22-20%25%22%20y%3D%22-20%25%22%20width%3D%22140%25%22%20height%3D%22140%25%22%3E%0A%20%20%20%20%20%20%3CfeDropShadow%20dx%3D%220%22%20dy%3D%2216%22%20stdDeviation%3D%2214%22%20flood-color%3D%22%23000000%22%20flood-opacity%3D%220.65%22%20%2F%3E%0A%20%20%20%20%20%20%3CfeDropShadow%20dx%3D%220%22%20dy%3D%226%22%20stdDeviation%3D%226%22%20flood-color%3D%22%23000000%22%20flood-opacity%3D%220.45%22%20%2F%3E%0A%20%20%20%20%3C%2Ffilter%3E%0A%0A%20%20%20%20%3C!--%20Subtle%20Bevel%20Inner%20Shadow%20--%3E%0A%20%20%20%20%3Cfilter%20id%3D%22subtleBevel%22%3E%0A%20%20%20%20%20%20%3CfeDropShadow%20dx%3D%222%22%20dy%3D%222%22%20stdDeviation%3D%222%22%20flood-color%3D%22%23FFFFFF%22%20flood-opacity%3D%220.3%22%20%2F%3E%0A%20%20%20%20%3C%2Ffilter%3E%0A%20%20%3C%2Fdefs%3E%0A%0A%20%20%3C!--%20Sleek%20rounded%20slate%20squircle%20container%20--%3E%0A%20%20%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%22108%22%20fill%3D%22url(%23slateGlow)%22%20%2F%3E%0A%20%20%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%22508%22%20height%3D%22508%22%20rx%3D%22106%22%20fill%3D%22none%22%20stroke%3D%22rgba(255%2C255%2C255%2C0.08)%22%20stroke-width%3D%222%22%20%2F%3E%0A%0A%20%20%3C!--%20The%20AdVerse%203D%20Red%20Emblem%20Group%20--%3E%0A%20%20%3Cg%20filter%3D%22url(%23emblemDropShadow)%22%20transform%3D%22translate(0%2C%200)%22%3E%0A%20%20%20%20%3C!--%203D%20Depth%20%2F%20Bevel%20Underlay%20(Offset%20downward%20for%203D%20extrusion)%20--%3E%0A%20%20%20%20%3Cg%20transform%3D%22translate(4%2C%209)%22%20opacity%3D%220.95%22%3E%0A%20%20%20%20%20%20%3C!--%20Steps%203D%20extrusion%20--%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22152%2C246%20166%2C246%20166%2C260%20152%2C260%22%20fill%3D%22url(%23redShade)%22%20%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22172%2C218%20186%2C218%20186%2C232%20172%2C232%22%20fill%3D%22url(%23redShade)%22%20%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22192%2C190%20206%2C190%20206%2C204%20192%2C204%22%20fill%3D%22url(%23redShade)%22%20%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22212%2C162%20226%2C162%20226%2C176%20212%2C176%22%20fill%3D%22url(%23redShade)%22%20%2F%3E%0A%0A%20%20%20%20%20%20%3C!--%20Main%20Apex%20%26%20Arrow%20Body%20Extrusion%20--%3E%0A%20%20%20%20%20%20%3Cpath%20d%3D%22M%20240%2C78%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20276%2C140%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20316%2C196%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20340%2C148%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20362%2C88%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20364%2C188%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20332%2C236%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20332%2C284%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20294%2C228%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20240%2C168%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20186%2C228%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20154%2C284%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20L%20138%2C260%20%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20Z%22%20%0A%20%20%20%20%20%20%20%20%20%20%20%20fill%3D%22url(%23redShade)%22%20%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%0A%20%20%20%20%3C!--%20Main%20Front%20Surface%20of%20the%20Emblem%20--%3E%0A%20%20%20%20%3C!--%201.%20The%204%20Ascending%20Pixel%20%2F%20Bar-Chart%20Steps%20on%20Left%20Flank%20--%3E%0A%20%20%20%20%3Crect%20x%3D%22148%22%20y%3D%22238%22%20width%3D%2222%22%20height%3D%2222%22%20rx%3D%222%22%20fill%3D%22url(%23stepGrad)%22%20stroke%3D%22%23FFA0B2%22%20stroke-width%3D%221.2%22%20%2F%3E%0A%20%20%20%20%3Crect%20x%3D%22168%22%20y%3D%22210%22%20width%3D%2222%22%20height%3D%2222%22%20rx%3D%222%22%20fill%3D%22url(%23stepGrad)%22%20stroke%3D%22%23FFA0B2%22%20stroke-width%3D%221.2%22%20%2F%3E%0A%20%20%20%20%3Crect%20x%3D%22188%22%20y%3D%22182%22%20width%3D%2222%22%20height%3D%2222%22%20rx%3D%222%22%20fill%3D%22url(%23stepGrad)%22%20stroke%3D%22%23FFA0B2%22%20stroke-width%3D%221.2%22%20%2F%3E%0A%20%20%20%20%3Crect%20x%3D%22208%22%20y%3D%22154%22%20width%3D%2222%22%20height%3D%2222%22%20rx%3D%222%22%20fill%3D%22url(%23stepGrad)%22%20stroke%3D%22%23FFA0B2%22%20stroke-width%3D%221.2%22%20%2F%3E%0A%0A%20%20%20%20%3C!--%202.%20The%20Main%20%22A%22%20Peak%20and%20Right-Upward%20Arrow%20--%3E%0A%20%20%20%20%3Cpath%20d%3D%22%0A%20%20%20%20%20%20M%20238%2C72%0A%20%20%20%20%20%20L%20312%2C188%0A%20%20%20%20%20%20L%20296%2C218%0A%20%20%20%20%20%20L%20242%2C164%0A%20%20%20%20%20%20L%20194%2C218%0A%20%20%20%20%20%20L%20156%2C270%0A%20%20%20%20%20%20L%20134%2C248%0A%20%20%20%20%20%20L%20194%2C152%0A%20%20%20%20%20%20L%20238%2C72%0A%20%20%20%20%20%20Z%22%0A%20%20%20%20%20%20fill%3D%22url(%23redFront)%22%0A%20%20%20%20%2F%3E%0A%0A%20%20%20%20%3C!--%20Chevron%20Bridge%20connecting%20to%20Right%20Arrow%20--%3E%0A%20%20%20%20%3Cpath%20d%3D%22%0A%20%20%20%20%20%20M%20242%2C164%0A%20%20%20%20%20%20L%20296%2C218%0A%20%20%20%20%20%20L%20312%2C188%0A%20%20%20%20%20%20L%20326%2C146%0A%20%20%20%20%20%20L%20358%2C82%0A%20%20%20%20%20%20L%20358%2C180%0A%20%20%20%20%20%20L%20330%2C224%0A%20%20%20%20%20%20L%20330%2C270%0A%20%20%20%20%20%20L%20294%2C220%0A%20%20%20%20%20%20L%20242%2C164%0A%20%20%20%20%20%20Z%22%0A%20%20%20%20%20%20fill%3D%22url(%23redFront)%22%0A%20%20%20%20%2F%3E%0A%0A%20%20%20%20%3C!--%20Arrow%20Head%20on%20the%20Right%20Wing%20(Pointing%20Up-Right)%20--%3E%0A%20%20%20%20%3Cpolygon%20points%3D%22358%2C74%20366%2C176%20334%2C142%20308%2C172%20322%2C130%22%20fill%3D%22url(%23redFront)%22%20%2F%3E%0A%20%20%20%20%3C!--%20Arrow%20right%20facet%20bevel%20--%3E%0A%20%20%20%20%3Cpolygon%20points%3D%22358%2C74%20366%2C176%20348%2C154%22%20fill%3D%22%23C00C29%22%20%2F%3E%0A%0A%20%20%20%20%3C!--%20Left%20Flank%20Bevel%20Facet%20--%3E%0A%20%20%20%20%3Cpath%20d%3D%22M%20238%2C72%20L%20244%2C78%20L%20202%2C156%20L%20194%2C152%20Z%22%20fill%3D%22%23FF8CA3%22%20opacity%3D%220.75%22%20%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M%20238%2C72%20L%20244%2C78%20L%20314%2C192%20L%20312%2C188%20Z%22%20fill%3D%22%23B30924%22%20opacity%3D%220.9%22%20%2F%3E%0A%0A%20%20%20%20%3C!--%20Inner%20Chevron%20Shadow%20Arch%20--%3E%0A%20%20%20%20%3Cpolygon%20points%3D%22242%2C164%20290%2C214%20242%2C176%20196%2C214%22%20fill%3D%22%23750516%22%20opacity%3D%220.9%22%20%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E%0A" alt="AdVerse" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" /></div>
+        <div>
+          <div class="brand-title">AdVerse Agency</div>
+          <div class="brand-sub">Intelligence & Campaign Suite</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live Sheet Hub (Primary Daily Work Tool) -->
+        <button class="sheet-hub-btn" id="btnSheetConfig" onclick="openSheetConfigModal()" type="button" title="Google Sheet Data Hub">
+          <span class="live-dot" id="headerLiveDot"></span>
+          <span class="ms" style="font-size:16px">table_chart</span>
+          <span id="headerSheetLabel">Google Sheet Hub</span>
+        </button>
+
+        <!-- Live Data Audit & Parity Inspector -->
+        <button class="btn btn-secondary" id="btnAuditParity" onclick="openLiveDiagnosticsModal()" type="button" title="Live Google Sheet vs App Data Audit" style="font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px">
+          <span class="ms" style="font-size:16px;color:var(--sec)">fact_check</span>
+          <span class="hidden-sm">Data Audit</span>
+        </button>
+
+        <!-- Command Palette (Ctrl+K) -->
+        <button class="cmd-palette-btn" id="btnOpenCmd" onclick="openCmdPalette()" type="button" title="Quick Search & Actions (Ctrl+K)">
+          <span class="ms" style="font-size:16px">search</span>
+          <span class="hidden-sm">Search</span>
+          <span class="cmd-kbd">⌘K</span>
+        </button>
+
+        <!-- Instant Sync & Refresh -->
+        <button class="btn btn-secondary" id="btnRefreshTop" onclick="refreshCurrentView()" type="button" title="Instant Refresh & Sync">
+          <span class="ms" style="font-size:16px">sync</span>
+        </button>
+
+        <!-- Consolidated One-Time & Config Tools Menu (Settings, Accounts, Links, Theme, Backup) -->
+        <div class="settings-menu-wrap">
+          <button class="btn btn-secondary" id="btnSettingsToggle" onclick="toggleSettingsDropdown(event)" type="button" title="Settings, Backup, Pages & Setup Tools" style="font-weight:700">
+            <span class="ms" style="font-size:17px;color:var(--pri)">settings</span>
+            <span class="hidden-sm">Tools & Settings</span>
+            <span class="ms" style="font-size:14px;opacity:0.6">expand_more</span>
+          </button>
+          <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+            <div class="settings-item-header">Management & Config</div>
+            
+            <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openAdAccountsPagesModal();">
+              <span class="ms" style="color:var(--wrn)">manage_accounts</span>
+              <span>Accounts & Pages</span>
+              <span class="settings-menu-badge">Manage</span>
+            </button>
+
+            <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openAnalyticsModal();">
+              <span class="ms" style="color:var(--sec)">analytics</span>
+              <span>Visual Analytics</span>
+            </button>
+
+            <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openRoleLinksModal();">
+              <span class="ms" style="color:#10B981">link</span>
+              <span>Shareable Access Links</span>
+            </button>
+
+            <div class="settings-item-divider"></div>
+            <div class="settings-item-header">Appearance & Themes</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 6px">
+              <button class="theme-opt-btn" onclick="applyThemeStyle('dark')" type="button" style="padding:6px 8px;font-size:11.5px">
+                <span class="theme-color-dot" style="background:#6366F1"></span> Cyber
+              </button>
+              <button class="theme-opt-btn" onclick="applyThemeStyle('emerald')" type="button" style="padding:6px 8px;font-size:11.5px">
+                <span class="theme-color-dot" style="background:#10B981"></span> Emerald
+              </button>
+              <button class="theme-opt-btn" onclick="applyThemeStyle('obsidian')" type="button" style="padding:6px 8px;font-size:11.5px">
+                <span class="theme-color-dot" style="background:#F59E0B"></span> Obsidian
+              </button>
+              <button class="theme-opt-btn" onclick="applyThemeStyle('light')" type="button" style="padding:6px 8px;font-size:11.5px">
+                <span class="theme-color-dot" style="background:#4F46E5"></span> Light
+              </button>
+            </div>
+
+            <div class="settings-item-divider"></div>
+            <div class="settings-item-header">One-Time Backups & Code</div>
+
+            <a class="settings-menu-item" href="/api/download-zip" download="adverse-agency-project.zip" onclick="closeAllDropdowns();">
+              <span class="ms" style="color:#10B981">folder_zip</span>
+              <span>Download Project .ZIP</span>
+              <span class="settings-menu-badge">Full</span>
+            </a>
+
+            <button class="settings-menu-item" type="button" onclick="closeAllDropdowns(); openCodeExporterModal();">
+              <span class="ms" style="color:var(--pri)">content_copy</span>
+              <span>Apps Script Code Exporter</span>
+              <span class="settings-menu-badge">1-Click</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- User Role Badge -->
+        <div class="user-badge" id="userBadge" style="background:var(--pri-light);color:var(--pri);padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:800;border:1px solid rgba(99,102,241,.3)">Admin</div>
+
+        <!-- Logout -->
+        <button class="btn-theme" onclick="appLogout()" type="button" title="Logout">
+          <span class="ms" style="font-size:16px">logout</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="top-nav" id="topNav"></nav>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <div class="page-content" id="pageContent">
+        <!-- Top Header & Action Row -->
+        <div class="topbar-centered" id="topbarCentered">
+          <div class="topbar-titles">
+            <h1 id="pageTitle">Today Created Campaign</h1>
+            <p id="pageSubtitle">Real-time daily ad campaign records & performance</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn btn-secondary" id="btnWhatsAppTopNotice" onclick="openWhatsAppModal()" type="button" title="Generate WhatsApp Client Notice">
+              <span class="ms" style="color:#25D366;font-size:17px">chat</span> Client Notice
+            </button>
+            <button class="btn btn-secondary" onclick="exportCurrentTableCSV()" type="button" title="Export Table as CSV">
+              <span class="ms" style="font-size:16px">download</span> Export CSV
+            </button>
+            <button class="btn btn-primary" id="btnToggleEntry" onclick="toggleEntryCard()" type="button">
+              <span class="ms" style="font-size:17px">add</span> <span id="btnToggleEntryText">New Campaign</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Monthly Calculation Filter -->
+        <div class="filters-bar hidden" id="agencyCalcFilterWrap">
+          <div class="filter-field">
+            <label>Select Month</label>
+            <select id="agencyCalcMonth"></select>
+          </div>
+          <div class="filter-field">
+            <label>Select Year</label>
+            <select id="agencyCalcYear"></select>
+          </div>
+          <button class="btn btn-primary" id="btnAgencyCalcFilter" type="button" onclick="loadMenuData()" style="margin-top:auto">
+            <span class="ms" style="font-size:16px">tune</span> Calculate Month
+          </button>
+        </div>
+
+
+        <!-- Stat Cards (KPI Summary) -->
+        <div class="stats-compact" id="statsRow">
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
+        </div>
+
+        <!-- Fast Entry Card -->
+        <div class="entry-card hidden" id="entryCard">
+          <div class="entry-header">
+            <div>
+              <h3><span class="ms" style="color:var(--pri)">rocket_launch</span> <span id="entryTitle">New Campaign Entry</span></h3>
+              <p id="entrySub">Instant 0-second entry • Auto-saved to memory & synced with Google Sheet</p>
+            </div>
+            <div class="entry-actions" style="display:flex;gap:8px">
+              <button class="btn btn-secondary" id="btnResetEntry" type="button"><span class="ms" style="font-size:14px">restart_alt</span> Clear</button>
+              <button class="btn btn-primary" id="btnSaveEntry" type="button"><span class="ms" style="font-size:16px">check</span> Save Campaign</button>
+            </div>
+          </div>
+          <div class="entry-body">
+            <form id="entryForm" class="entry-grid"></form>
+          </div>
+        </div>
+
+        <!-- Filters Bar for Campaign & Lists -->
+        <div class="filters-bar hidden" id="filtersBar">
+          <div class="filter-field">
+            <label>Month</label>
+            <select id="filterMonth"><option value="">All Months</option></select>
+          </div>
+          <div class="filter-field">
+            <label>Year</label>
+            <select id="filterYear"><option value="">All Years</option></select>
+          </div>
+          <div class="filter-field hidden" id="pageTypeFilterField">
+            <label>Page Type</label>
+            <select id="pageTypeFilter">
+              <option value="">All Pages</option>
+              <option value="new">New Pages</option>
+              <option value="old">Old Pages</option>
+            </select>
+          </div>
+          <div class="filter-field hidden" id="campaignDateFilterField">
+            <label>Start Date</label>
+            <input type="date" id="filterDate">
+          </div>
+          <button class="btn btn-primary" id="btnApplyFilters" type="button" style="margin-top:auto">
+            <span class="ms" style="font-size:16px">filter_list</span> Apply
+          </button>
+        </div>
+
+        <!-- Daily Stats Wrap -->
+        <div class="daily-stats-wrap hidden" id="dailyStatsWrap" style="background:var(--card);border:1px solid var(--bor);border-radius:var(--radius-md);padding:14px 18px;display:flex;justify-content:space-between;align-items:center">
+          <div class="daily-stats-title" style="font-weight:800;font-size:13px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+            <span class="ms" style="color:var(--pri)">calendar_today</span> <span id="dailyStatsTitle">Daily Performance</span>
+          </div>
+          <div class="daily-stats-row" id="dailyStatsRow" style="display:flex;gap:16px"></div>
+        </div>
+
+        <!-- Payment Entry Card -->
+        <div class="entry-card hidden" id="paymentEntryCard">
+          <div class="entry-header">
+            <div>
+              <h3><span class="ms" style="color:#10B981">payments</span> Add Daily Client Payment</h3>
+              <p>Record Bkash, Nagad, or Bank deposit directly</p>
+            </div>
+            <button class="btn btn-primary" id="btnAddPayment" type="button"><span class="ms">add</span> Record Payment</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end">
+            <div class="form-field"><label>Date</label><input type="date" id="payDate"></div>
+            <div class="form-field">
+              <label>Payment Method</label>
+              <select id="payMethod">
+                <option value="Bkash">Bkash</option>
+                <option value="Nagad">Nagad</option>
+                <option value="Bank">Bank</option>
+                <option value="BK to Bank">BK to Bank</option>
+                <option value="Merchant">Merchant</option>
+              </select>
+            </div>
+            <div class="form-field"><label>Paid (৳)</label><input type="number" id="payAmount" step="any" placeholder="e.g. 5000"></div>
+          </div>
+        </div>
+
+        <!-- End Ads Container -->
+        <div class="end-ads-container hidden" id="endAdsContainer" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px">
+          <div class="records-card">
+            <div class="table-toolbar">
+              <div style="font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:6px">
+                <span class="ms" style="color:var(--dan)">event_busy</span> Ending Today
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="todayEndTable">
+                <thead><tr><th>Page Name</th><th>Start</th><th>End</th><th>Day</th><th>Budget</th></tr></thead>
+                <tbody id="todayEndBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="records-card">
+            <div class="table-toolbar">
+              <div style="font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:6px">
+                <span class="ms" style="color:var(--wrn)">schedule</span> Ending Tomorrow
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="tomorrowEndTable">
+                <thead><tr><th>Page Name</th><th>Start</th><th>End</th><th>Day</th><th>Budget</th></tr></thead>
+                <tbody id="tomorrowEndBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Final Calculation Card -->
+        <div class="records-card hidden" id="finalCalcCard">
+          <div class="table-toolbar">
+            <div style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="color:var(--pri)">account_balance</span> Monthly Financial Statement
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="final-calc-table" style="width:100%">
+              <thead><tr><th>Financial Metric</th><th style="text-align:right">Calculated Total</th></tr></thead>
+              <tbody id="finalCalcBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Payment History Card -->
+        <div class="records-card hidden" id="paymentHistoryCard">
+          <div class="table-toolbar">
+            <div style="font-weight:800;font-size:14px">Payment Deposit History</div>
+          </div>
+          <div class="table-wrap">
+            <table id="paymentTable"><thead id="paymentTableHead"></thead><tbody id="paymentTableBody"></tbody></table>
+          </div>
+        </div>
+
+        <!-- Main Records Card with Sticky Search & Toolbar -->
+        <div class="records-card" id="recordsCard">
+          <div class="table-toolbar">
+            <div class="toolbar-search">
+              <span class="ms">search</span>
+              <input type="text" id="tableFilterInput" oninput="filterTableRows(this.value)" placeholder="Instant filter table records...">
+            </div>
+            <div class="toolbar-controls">
+              <span class="counter-pill" id="tableSummaryCounter">0 records</span>
+              <button class="btn btn-secondary" id="btnCopyAllCampaigns" onclick="copyAllCurrentTableCampaigns()" type="button" style="padding:5px 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:4px" title="Copy all campaigns currently displayed (each on its own line)">
+                <span class="ms" style="font-size:14px">content_copy</span> Copy All
+              </button>
+              <button class="btn btn-secondary" onclick="exportCurrentTableCSV()" type="button" style="padding:5px 10px;font-size:11.5px">
+                <span class="ms" style="font-size:14px">download</span> Export
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="dataTable"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+            <div class="empty-state hidden" id="emptyState" style="padding:48px 20px;text-align:center;color:var(--txt-muted)">
+              <span class="ms" style="font-size:40px;opacity:0.4;display:block;margin-bottom:8px">folder_open</span>
+              <div style="font-weight:700;font-size:14px">No records found</div>
+              <p style="font-size:12px;margin:4px 0 0;color:var(--txt-dim)">Add a new entry or sync with your Google Sheet</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette Modal (Ctrl + K) -->
+  <div class="modal-overlay hidden" id="cmdPaletteOverlay" onclick="if(event.target===this)closeCmdPalette()">
+    <div class="cmd-box">
+      <div class="cmd-input-wrap">
+        <span class="ms" style="color:var(--pri);font-size:22px">search</span>
+        <input type="text" id="cmdPaletteInput" placeholder="Type a command or jump to menu... (e.g. Campaign, Add, Sync, Dark)" oninput="handleCmdSearch(this.value)">
+        <span class="cmd-kbd">ESC</span>
+      </div>
+      <div class="cmd-list" id="cmdList"></div>
+    </div>
+  </div>
+
+  <!-- Visual Analytics & ROI Intelligence Modal -->
+  <div class="modal-overlay hidden" id="analyticsOverlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gp);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">analytics</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Agency Intelligence & Analytics</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Live Performance, Revenue, Dues & Client Breakdown</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAnalyticsModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body" id="analyticsModalBody">
+        <div class="skeleton skeleton-card" style="margin-bottom:12px"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeAnalyticsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp Client Notice Generator Modal -->
+  <div class="modal-overlay hidden" id="whatsappOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:#25D366;display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">chat</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">WhatsApp Client Notice Generator</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Create formatted campaign activation notices in 1-click</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeWhatsAppModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field" style="margin-bottom:12px">
+          <label>Select Campaign Record</label>
+          <select id="waCampaignSelect" onchange="generateWhatsAppNotice()"></select>
+        </div>
+        <div class="form-field" style="margin-bottom:12px">
+          <label>Language Style</label>
+          <select id="waLanguageSelect" onchange="generateWhatsAppNotice()">
+            <option value="bn">Bangla & English Professional (বাংলা ও ইংরেজি)</option>
+            <option value="en">English Clean Format</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Generated Client Message</label>
+          <textarea id="waMessageText" rows="7" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeWhatsAppModal()">Close</button>
+        <button class="btn btn-primary" style="background:#25D366;border-color:#25D366" onclick="copyWhatsAppNotice()" type="button">
+          <span class="ms" style="font-size:16px">content_copy</span> Copy Message
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Record Modal -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Edit Record</h3>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <form id="recordForm" class="form-grid"></form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnSaveRecord" type="button">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Data Diagnostics & Parity Audit Modal -->
+  <div class="modal-overlay hidden" id="diagnosticsModalOverlay">
+    <div class="modal modal-lg" style="max-width:850px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gb);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">fact_check</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Google Sheet vs Web App — Data Parity & Diagnostic Audit</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Real-time verification chain: Single Source of Truth & Zero Data Loss</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeDiagnosticsModal()"><span class="ms">close</span></button>
+      </div>
+
+      <div class="modal-body" style="padding:20px">
+        <div id="diagnosticsLoading" style="text-align:center;padding:40px">
+          <div class="spinner" style="margin:0 auto 16px;width:32px;height:32px;border:3px solid var(--bor);border-top-color:var(--pri);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+          <div style="font-size:14px;font-weight:700">Running full-chain data diagnostic from Google Sheets...</div>
+          <div style="font-size:12px;color:var(--txt-muted);margin-top:6px">Auditing physical rows, column headers, duplicate records, backend response & frontend rendering</div>
+        </div>
+
+        <div id="diagnosticsContent" class="hidden">
+          <!-- Status Banner -->
+          <div id="diagStatusBanner" style="padding:14px 18px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+            <span class="ms" id="diagStatusIcon" style="font-size:28px">check_circle</span>
+            <div>
+              <div id="diagStatusTitle" style="font-size:15px;font-weight:800">Parity Status</div>
+              <div id="diagStatusDesc" style="font-size:12.5px;margin-top:2px;opacity:0.9"></div>
+            </div>
+          </div>
+
+          <!-- Parity Verification Chain Table -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:16px;margin-bottom:16px">
+            <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:12px">
+              📊 6-Stage Parity Verification Chain (Target vs Actual)
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));gap:10px;text-align:center">
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">1. Google Sheet</div>
+                <div id="diagChainSheet" style="font-size:18px;font-weight:800;color:var(--sec);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Physical Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">2. Backend Memory</div>
+                <div id="diagChainMemory" style="font-size:18px;font-weight:800;color:var(--pri);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Store Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">3. Backend RPC</div>
+                <div id="diagChainRpc" style="font-size:18px;font-weight:800;color:var(--suc);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Returned Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">4. Frontend State</div>
+                <div id="diagChainFrontend" style="font-size:18px;font-weight:800;color:var(--wrn);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Raw Records</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">5. Table Rendered</div>
+                <div id="diagChainRendered" style="font-size:18px;font-weight:800;color:var(--txt);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Displayed Rows</div>
+              </div>
+              <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--bor)">
+                <div style="font-size:11px;color:var(--txt-muted)">6. Dashboard Total</div>
+                <div id="diagChainDashboard" style="font-size:18px;font-weight:800;color:var(--pri);margin:4px 0">0</div>
+                <div style="font-size:10.5px;color:var(--txt-dim)">Campaign Stat</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deep Sheet Details Grid -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:10px">Worksheet Details</div>
+              <table style="width:100%;font-size:12px;line-height:1.8">
+                <tr><td style="color:var(--txt-muted)">Spreadsheet ID:</td><td style="font-family:monospace;text-align:right" id="diagSheetId"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Worksheet:</td><td style="font-weight:700;text-align:right" id="diagWorksheetName"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Header Row:</td><td style="text-align:right" id="diagHeaderRow">Row 1</td></tr>
+                <tr><td style="color:var(--txt-muted)">First Data Row:</td><td style="text-align:right;font-weight:600" id="diagFirstRow"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Last Data Row:</td><td style="text-align:right;font-weight:600" id="diagLastRow"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Total All Months:</td><td style="text-align:right;font-weight:800;color:var(--suc)" id="diagAllMonthsTotal"></td></tr>
+              </table>
+            </div>
+
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-size:12px;font-weight:800;color:var(--txt-muted);text-transform:uppercase;margin-bottom:10px">Data Integrity & Diagnostics</div>
+              <table style="width:100%;font-size:12px;line-height:1.8">
+                <tr><td style="color:var(--txt-muted)">Valid Records:</td><td style="text-align:right;font-weight:700;color:var(--suc)" id="diagValidCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Blank Rows:</td><td style="text-align:right" id="diagBlankCount">0</td></tr>
+                <tr><td style="color:var(--txt-muted)">Malformed Rows:</td><td style="text-align:right" id="diagMalformedCount">0</td></tr>
+                <tr><td style="color:var(--txt-muted)">Duplicate SLs in Sheet:</td><td style="text-align:right;font-weight:700" id="diagDupSLCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Duplicate Record IDs:</td><td style="text-align:right;font-weight:700" id="diagDupIdCount"></td></tr>
+                <tr><td style="color:var(--txt-muted)">Single Source of Truth:</td><td style="text-align:right;font-weight:700;color:var(--suc)">Enforced (Google Sheets)</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px">
+        <button class="btn btn-secondary" type="button" onclick="closeDiagnosticsModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="runDiagnosticsCheck()">
+          <span class="ms" style="font-size:16px">refresh</span> Re-run Live Audit
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Sheet Data & Sync Hub Modal -->
+  <div class="modal-overlay hidden" id="sheetConfigOverlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gs);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">table_chart</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">Google Sheet Data & Sync Hub</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Live Data Connector & Automated Synchronization</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeSheetConfigModal()"><span class="ms">close</span></button>
+      </div>
+
+      <div class="hub-tabs">
+        <button type="button" class="hub-tab active" onclick="switchHubTab('tab-sync')">
+          <span class="ms">sync_alt</span> 1. Live Sheet Sync
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-import')">
+          <span class="ms">content_paste_go</span> 2. Direct Import (Copy-Paste)
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-script')">
+          <span class="ms">code</span> 3. Apps Script (1-Click)
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-guide')">
+          <span class="ms">help_outline</span> 4. User Guide (বাংলা)
+        </button>
+        <button type="button" class="hub-tab" onclick="switchHubTab('tab-backup')">
+          <span class="ms">folder_zip</span> 5. Download ZIP & Backup
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top:16px">
+        <!-- TAB 1: Live Sheet Sync -->
+        <div id="tab-sync" class="hub-panel">
+          <!-- Google Account OAuth Sign-In Status Card -->
+          <div style="background:var(--card-elevated);padding:14px 16px;border-radius:12px;border:1px solid var(--bor);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:38px;height:38px;border-radius:50%;background:#ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.15)">
+                <svg width="20" height="20" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.29 21.39 7.35 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15z"/>
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.29 2.61 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                </svg>
+              </div>
+              <div>
+                <div style="font-size:11px;font-weight:800;color:var(--txt-muted);text-transform:uppercase">GOOGLE ACCOUNT & DRIVE ACCESS</div>
+                <div style="font-size:13.5px;font-weight:700;margin-top:2px" id="googleAuthAccountLabel">Checking Google Account...</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-primary" id="btnGoogleSignIn" onclick="handleGoogleSignIn()" type="button" style="padding:7px 14px;font-size:12.5px;background:#4285F4;color:#fff;border:none">
+                <span class="ms" style="font-size:16px">login</span> Connect Google Account
+              </button>
+              <button class="btn btn-secondary hidden" id="btnGoogleSignOut" onclick="handleGoogleSignOut()" type="button" style="padding:7px 12px;font-size:12px">
+                <span class="ms" style="font-size:15px">logout</span> Disconnect
+              </button>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--card-elevated);padding:12px 16px;border-radius:12px;border:1px solid var(--bor);margin-bottom:16px">
+            <div>
+              <div style="font-size:11px;font-weight:800;color:var(--txt-muted);text-transform:uppercase">CURRENT LIVE STATUS</div>
+              <div style="font-size:13px;font-weight:700;margin-top:2px" id="hubStatusText">Connected with Google Sheet</div>
+            </div>
+            <span id="sheetStatusBadge" class="pill pill-green">Live Connected ✅</span>
+          </div>
+
+          <div class="form-field" style="margin-bottom:12px">
+            <label>Google Spreadsheet URL or Sheet ID *</label>
+            <input type="text" id="sheetIdInput" placeholder="Paste full Google Sheet Link (e.g. https://docs.google.com/spreadsheets/d/1BxiMVs.../edit)">
+            <small style="color:var(--txt-muted);font-size:11.5px;margin-top:4px">
+              💡 আপনি সরাসরি পুরো গুগল শীট লিংক অথবা শুধু <b>Sheet ID</b> পেস্ট করতে পারেন।
+            </small>
+          </div>
+
+          <div class="form-field" style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <label>Apps Script Webhook URL (For Direct Live Auto-Save to Sheet)</label>
+              <button class="btn btn-secondary" onclick="testWebhookConnection()" type="button" style="padding:2px 10px;font-size:11px">
+                <span class="ms" style="font-size:14px">network_ping</span> Test Connection (টেস্ট)
+              </button>
+            </div>
+            <input type="text" id="webhookUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+            <small style="color:var(--txt-muted);font-size:11.5px;margin-top:4px">
+              💡 Apps Script এ Web App ডিপ্লয় করে URL এখানে দিলে অ্যাপের প্রতিটি এন্ট্রি <b>সরাসরি গুগল শিটে সেভ</b> হবে।
+            </small>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btnPushAllData" onclick="pushAllDataToGoogleSheet()" type="button" style="padding:10px 18px;font-size:13px;background:linear-gradient(135deg,#059669,#10b981)">
+              <span class="ms" style="font-size:18px">cloud_upload</span> Push All Data to Google Sheet (সব ডাটা শিটে সেভ করুন)
+            </button>
+            <button class="btn btn-secondary" id="btnSyncAllData" onclick="syncSpreadsheetData()" type="button" style="padding:10px 18px;font-size:13px">
+              <span class="ms" style="font-size:18px">download</span> Fetch & Sync from Sheet (ডাটা আনুন)
+            </button>
+            <button class="btn btn-secondary" id="btnSaveSheetConfig" onclick="saveSheetConfig()" type="button" style="padding:10px 16px">
+              <span class="ms" style="font-size:17px">save</span> Save Config (সেভ)
+            </button>
+            <button class="btn btn-secondary" id="btnClearAllDataBtn" onclick="clearAllDatabaseData()" type="button" style="padding:10px 16px;color:var(--dan);border-color:rgba(239,68,68,0.4)" title="Clear all local data and start fresh">
+              <span class="ms" style="font-size:17px">delete_sweep</span> Clear Local Cache
+            </button>
+          </div>
+
+          <div id="syncResultBox" class="hidden" style="margin-top:12px;padding:14px;border-radius:12px;background:rgba(16,185,129,.15);border:1.5px solid rgba(16,185,129,.3);color:#10B981;font-size:12.5px;font-weight:600">
+          </div>
+        </div>
+
+        <!-- TAB 2: Direct Import -->
+        <div id="tab-import" class="hub-panel hidden">
+          <div style="background:var(--pri-light);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;color:var(--pri);font-size:12px">
+            💡 <b>দ্রুত ইমপোর্ট:</b> আপনার আগের গুগল শীট বা এক্সেল ফাইল থেকে রো (Rows) কপি করে সরাসরি নিচের বক্সে পেস্ট করুন।
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+            <div class="form-field">
+              <label>Target Category</label>
+              <select id="importTargetCategory">
+                <option value="campaign">Campaign Data (ক্যাম্পেইন ডাটা)</option>
+                <option value="payments">Payment History (পেমেন্ট রেকর্ড)</option>
+              </select>
+            </div>
+            <div class="form-field"><label>Month</label><select id="importMonthSelect"></select></div>
+            <div class="form-field"><label>Year</label><select id="importYearSelect"></select></div>
+          </div>
+
+          <div class="form-field" style="margin-bottom:14px">
+            <label>Paste Rows (Excel / Google Sheet Copy-Paste)</label>
+            <textarea id="importRawTextarea" rows="6" placeholder="001	Master Ad Account 1	Old Page	Page Name	2026-09-01	2026-09-06	Boost	5	50	140" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+          </div>
+
+          <button class="btn btn-primary" id="btnExecuteImport" onclick="executeRawImport()" type="button" style="padding:10px 18px">
+            <span class="ms" style="font-size:18px">file_upload</span> Import & Save Records
+          </button>
+        </div>
+
+        <!-- TAB 3: Apps Script Connector -->
+        <div id="tab-script" class="hub-panel hidden">
+          <div style="background:rgba(245,158,11,.15);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:12px 14px;margin-bottom:12px;color:var(--wrn);font-size:12px">
+            ⚡ <b>গুগল অ্যাপস স্ক্রিপ্ট কানেক্টর:</b> আপনার গুগল শীটের মেনুবারে একটি <b>"🚀 AdVerse Dashboard"</b> মেনু যুক্ত হবে, যেখান থেকে ১-ক্লিকে সব ডাটা ড্যাশবোর্ডে পাঠাতে পারবেন।
+          </div>
+
+          <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);border-radius:12px;padding:12px 14px;margin-bottom:14px;color:#10B981;font-size:11.5px;line-height:1.6">
+            <div style="font-weight:800;margin-bottom:4px">🔐 প্রথমবার পারমিশন (One-time Google Authorization):</div>
+            Apps Script এ কোড পেস্ট করে <b>Run</b> বাটনে ক্লিক করলে <i>"Authorization Required"</i> আসলে:
+            <br>১. <b>Review permissions</b> ক্লিক করুন ➔ ২. আপনার গুগল অ্যাকাউন্ট সিলেক্ট করুন ➔ ৩. <b>Advanced</b> ক্লিক করুন ➔ ৪. <b>Go to ... (unsafe)</b> ক্লিক করে <b>Allow</b> দিন।
+          </div>
+
+          <div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:6px">Apps Script Code (Code.gs)</div>
+          <div style="position:relative">
+            <textarea id="appsScriptCodeArea" readonly rows="8" style="width:100%;font-family:monospace;font-size:11.5px;background:#0F172A;color:#38BDF8;outline:none"></textarea>
+            <button type="button" onclick="copyAppsScriptCode()" class="btn btn-primary" style="position:absolute;top:8px;right:8px;padding:5px 12px;font-size:11px">
+              <span class="ms" style="font-size:14px">content_copy</span> Copy Code
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 4: User Guide -->
+        <div id="tab-guide" class="hub-panel hidden">
+          <div style="display:grid;gap:12px">
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:#4285F4;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">★</span>
+                গুগল অ্যাকাউন্ট দিয়ে সরাসরি কানেক্ট (সবচেয়ে সহজ)
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                Tab 1 এ <b>"Connect Google Account"</b> বাটনে ক্লিক করে আপনার জিমেইল দিয়ে সাইন ইন করুন। এরপর আপনার যে কোনো গুগল শীট লিঙ্ক দিয়ে <b>"Fetch & Sync"</b> বা <b>"Push All Data"</b> ক্লিক করলে কোনো জটিল সেটিংস ছাড়াই সরাসরি ডাটা আদান-প্রদান হবে।
+              </p>
+            </div>
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">1</span>
+                শীট লিংক অথবা Sheet ID দিয়ে সরাসরি সিঙ্ক
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                আপনার গুগল শীটের ব্রাউজার URL কপি করে Tab 1 এ পেস্ট করে <b>"Fetch & Sync"</b> বাটনে ক্লিক করুন।
+              </p>
+            </div>
+            <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+              <div style="font-weight:800;font-size:13px;color:var(--txt);display:flex;align-items:center;gap:6px">
+                <span style="width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px">2</span>
+                আগের সব ক্যাম্পেইন শীট অটো-ডিটেকশন
+              </div>
+              <p style="margin:6px 0 0 28px;font-size:12px;color:var(--txt-muted)">
+                শীটের নাম <code>Campaign_September_2026</code>, <code>Payments</code>, <code>Page List</code> যাই থাকুক, সিস্টেম স্বয়ংক্রিয়ভাবে ডাটা লোড করে নেবে।
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: Download ZIP & Project Backup -->
+        <div id="tab-backup" class="hub-panel hidden">
+          <div style="background:var(--card-elevated);border:1.5px solid rgba(16,185,129,0.35);border-radius:14px;padding:18px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:10px;background:#10B981;color:#fff;display:flex;align-items:center;justify-content:center">
+                <span class="ms" style="font-size:24px">folder_zip</span>
+              </div>
+              <div>
+                <h4 style="margin:0;font-size:15px;font-weight:800;color:var(--txt)">সম্পূর্ণ অ্যাপ সোর্স কোড ডাউনলোড (.ZIP)</h4>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">সকল ফাইল, কনফিগ ও ব্যাকএন্ড স্ক্রিপ্ট সহ অফলাইন বা অন্য জিমেইলে ট্রান্সফার ব্যাকআপ</p>
+              </div>
+            </div>
+
+            <p style="font-size:12.5px;line-height:1.6;color:var(--txt);margin:0 0 16px">
+              সেটিংস গিয়ার মেনু খুঁজতে সমস্যা হলে নিচে দেওয়া সরাসরি ডাউনলোড বাটনটিতে ক্লিক করলেই পুরো প্রজেক্টের <b>.ZIP</b> ফাইল আপনার ডিভাইসে ডাউনলোড হয়ে যাবে।
+            </p>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <a href="/api/download-zip" download="adverse-agency-project.zip" class="btn btn-primary" style="text-decoration:none;padding:10px 18px;font-size:13.5px;font-weight:700;display:inline-flex;align-items:center;gap:8px;background:#10B981">
+                <span class="ms" style="font-size:18px">download</span> Download Source Code (.ZIP)
+              </a>
+              <a href="/adverse-agency-source.zip" download="adverse-agency-project.zip" class="btn btn-secondary" style="text-decoration:none;padding:10px 16px;font-size:13px;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:17px">cloud_download</span> Direct Mirror Link
+              </a>
+            </div>
+          </div>
+
+          <!-- Apps Script Standalone Web App Edition (Code.gs & index.html) -->
+          <div style="background:var(--card-elevated);border:1.5px solid rgba(99,102,241,0.4);border-radius:14px;padding:18px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:10px;background:var(--pri);color:#fff;display:flex;align-items:center;justify-content:center">
+                <span class="ms" style="font-size:24px">code_blocks</span>
+              </div>
+              <div>
+                <h4 style="margin:0;font-size:15px;font-weight:800;color:var(--txt)">Google Apps Script Standalone Web App (Code.gs + index.html)</h4>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">গুগল ড্রাইভে সম্পূর্ণ ফ্রি ও সুপার-ফাস্ট চালানোর রেডি-মেড ফাইল</p>
+              </div>
+            </div>
+
+            <p style="font-size:12.5px;line-height:1.6;color:var(--txt);margin:0 0 14px">
+              আপনার Google Sheet এর ভেতরে <b>Extensions &gt; Apps Script</b> এ গিয়ে <code>Code.gs</code> এবং <code>index.html</code> ফাইল দুটি দিয়ে সরাসরি Web App হিসেবে ডিপ্লয় করে চালাতে পারবেন।
+            </p>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+              <a href="/api/download-apps-script" download="adverse-apps-script-suite.zip" class="btn btn-primary" style="text-decoration:none;padding:9px 16px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:17px">download</span> Download Apps Script Suite (.ZIP)
+              </a>
+              <a href="/copy-html" target="_blank" class="btn btn-primary" style="background:#10B981;text-decoration:none;padding:9px 16px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:17px">content_copy</span> 1-Click Copy index.html
+              </a>
+              <a href="/api/apps-script-code" target="_blank" class="btn btn-secondary" style="text-decoration:none;padding:9px 14px;font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:16px">description</span> View Code.gs
+              </a>
+              <a href="/api/apps-script-html" target="_blank" class="btn btn-secondary" style="text-decoration:none;padding:9px 14px;font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
+                <span class="ms" style="font-size:16px">html</span> View index.html
+              </a>
+            </div>
+          </div>
+
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:12px;padding:14px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:17px;color:var(--pri)">help</span> অন্য জিমেইলে কীভাবে ব্যবহার করবেন?
+            </div>
+            <ol style="margin:0;padding-left:20px;font-size:12px;color:var(--txt-muted);line-height:1.7">
+              <li>উপরে <b>"Download Source Code (.ZIP)"</b> বাটনে ক্লিক করে ফাইলটি ডাউনলোড করুন।</li>
+              <li>আপনার অন্য জিমেইল দিয়ে ব্রাউজারে লগইন করে <b style="color:var(--pri)">ai.studio/build</b> এ যান।</li>
+              <li>সেখানে <b>Import</b> বা <b>Upload ZIP</b> দিয়ে এই ফাইলটি আপলোড করলেই সাথে সাথে সম্পূর্ণ অ্যাপটি ওই জিমেইলে হুবহু চালু হয়ে যাবে।</li>
+              <li>অথবা আপনি আপনার কম্পিউটারে আনজিপ করে <code>npm install</code> এবং <code>npm run dev</code> চালিয়ে লোকালিও ব্যবহার করতে পারবেন।</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeSheetConfigModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Role Links Modal -->
+  <div class="modal-overlay hidden" id="roleLinksOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3><span class="ms" style="font-size:20px;vertical-align:middle;margin-right:6px">link</span> Access Links & Roles</h3>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeRoleLinksModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin:0 0 16px;font-size:13px;color:var(--txt-muted)">
+          Share these direct access links with your team for instant one-click login.
+        </p>
+
+        <!-- Admin Card -->
+        <div style="background:var(--pri-light);border:1.5px solid rgba(99,102,241,.3);border-radius:14px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:14px;color:var(--pri);display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:18px">admin_panel_settings</span> Admin Link (Full Access)
+            </div>
+            <span class="pill pill-purple">PIN: 1234</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="adminLinkInput" readonly style="flex:1;min-height:36px;padding:6px 10px;font-size:12px;background:var(--input-bg);color:var(--txt)" value="">
+            <button class="btn btn-primary" type="button" onclick="copyLink('adminLinkInput')">
+              <span class="ms" style="font-size:15px">content_copy</span> Copy
+            </button>
+          </div>
+        </div>
+
+        <!-- Viewer Card -->
+        <div style="background:var(--suc-light);border:1.5px solid rgba(16,185,129,.3);border-radius:14px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:14px;color:var(--suc);display:flex;align-items:center;gap:6px">
+              <span class="ms" style="font-size:18px">visibility</span> Viewer Link (Read-Only)
+            </div>
+            <span class="pill pill-green">PIN: 1111</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="viewerLinkInput" readonly style="flex:1;min-height:36px;padding:6px 10px;font-size:12px;background:var(--input-bg);color:var(--txt)" value="">
+            <button class="btn btn-primary" style="background:var(--gs)" type="button" onclick="copyLink('viewerLinkInput')">
+              <span class="ms" style="font-size:15px">content_copy</span> Copy
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeRoleLinksModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIN Login Overlay -->
+  <div id="pinLoginOverlay" style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:radial-gradient(ellipse at 50% 20%, #1E1B4B 0%, #0F172A 100%);font-family:Inter,system-ui,sans-serif">
+    <div style="width:100%;max-width:400px;background:var(--card);border-radius:24px;padding:36px 30px;box-shadow:0 30px 80px rgba(0,0,0,.65);text-align:center;position:relative;border:1px solid var(--bor)">
+      <div style="width:54px;height:54px;border-radius:16px;background:var(--gp);display:inline-flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 10px 25px -4px rgba(99,102,241,.5);margin-bottom:14px">
+        <span class="ms" style="font-size:28px">lock</span>
+      </div>
+      <h2 style="margin:0;color:var(--txt);font-size:22px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-.02em">AdVerse Agency</h2>
+      <p style="margin:6px 0 20px;color:var(--txt-muted);font-size:13px;font-weight:500">Sign in to unlock your management dashboard</p>
+      
+      <div style="margin-bottom:14px;position:relative">
+        <input id="pinLoginInput" type="password" inputmode="numeric" placeholder="••••" maxlength="10" style="width:100%;padding:14px 16px;border:2px solid var(--bor);border-radius:14px;font-size:20px;text-align:center;outline:none;letter-spacing:8px;font-weight:700;color:var(--txt);background:var(--input-bg);transition:.2s">
+      </div>
+      
+      <div id="pinLoginError" style="display:none;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#EF4444;font-size:12px;font-weight:600"></div>
+      
+      <button id="pinLoginBtn" type="button" style="width:100%;padding:13px;border:0;border-radius:14px;background:var(--gp);color:#fff;font-size:14px;font-weight:800;letter-spacing:.2px;cursor:pointer;box-shadow:0 8px 24px -4px rgba(99,102,241,.5);transition:.2s">
+        Unlock Dashboard
+      </button>
+      
+      <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--bor)">
+        <div style="font-size:11px;font-weight:800;color:var(--txt-dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Quick 1-Click Access</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button type="button" onclick="quickLogin('1234')" style="padding:10px 8px;border:1.5px solid rgba(99,102,241,.3);border-radius:12px;background:var(--pri-light);color:var(--pri);font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+            <span class="ms" style="font-size:16px">admin_panel_settings</span> Admin (1234)
+          </button>
+          <button type="button" onclick="quickLogin('1111')" style="padding:10px 8px;border:1.5px solid rgba(16,185,129,.3);border-radius:12px;background:var(--suc-light);color:var(--suc);font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+            <span class="ms" style="font-size:16px">visibility</span> Viewer (1111)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Exchange Rate Quick Adjuster Modal -->
+  <div class="modal-overlay hidden" id="rateModalOverlay" onclick="if(event.target===this)closeRateModal()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:var(--gw);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:20px">currency_exchange</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:800">USD Exchange Rate</h3>
+            <p style="margin:2px 0 0;font-size:11.5px;color:var(--txt-muted)">Adjust conversion rate for all campaigns & billing</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeRateModal()"><span class="ms">close</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field" style="margin-bottom:14px">
+          <label>Dollar to BDT Rate (1 USD = ? ৳)</label>
+          <input type="number" id="inputNewRate" value="140" step="any" style="font-size:16px;font-weight:800;text-align:center">
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+          <button class="btn btn-secondary" onclick="setQuickRate(138)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳138</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(140)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳140</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(142)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳142</button>
+          <button class="btn btn-secondary" onclick="setQuickRate(145)" type="button" style="padding:6px 0;font-size:12px;font-weight:700">৳145</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeRateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewRate()" type="button">
+          <span class="ms" style="font-size:16px">check</span> Update Rate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ad Accounts & Pages Manager Modal -->
+  <div class="modal-overlay hidden" id="adAccountsPagesOverlay" onclick="if(event.target===this)closeAdAccountsPagesModal()">
+    <div class="modal" style="max-width:750px;width:95%">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:38px;height:38px;border-radius:12px;background:var(--gp);display:flex;align-items:center;justify-content:center;color:#fff">
+            <span class="ms" style="font-size:22px">manage_accounts</span>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:17px;font-weight:800">AD Accounts & Page Names Manager</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--txt-muted)">ড্রপডাউনের জন্য পূর্বে থেকেই Ad Account এবং Page Name লিখে ও সেভ করে রাখুন</p>
+          </div>
+        </div>
+        <button class="btn btn-icon btn-secondary" type="button" onclick="closeAdAccountsPagesModal()"><span class="ms">close</span></button>
+      </div>
+
+      <!-- Manager Tabs -->
+      <div style="display:flex;gap:8px;padding:0 24px;border-bottom:1px solid var(--bor);margin-bottom:16px;background:var(--card-elevated)">
+        <button type="button" id="tabBtnAdAccounts" class="nav-btn active" style="border-radius:0;border-bottom:2px solid var(--pri);padding:10px 14px;font-size:13px;font-weight:700" onclick="switchManagerTab('ad_accounts')">
+          <span class="ms" style="font-size:17px">badge</span> AD Accounts (<span id="countAdAccounts">0</span>)
+        </button>
+        <button type="button" id="tabBtnPages" class="nav-btn" style="border-radius:0;padding:10px 14px;font-size:13px;font-weight:700" onclick="switchManagerTab('pages')">
+          <span class="ms" style="font-size:17px">pages</span> Page Names (<span id="countPages">0</span>)
+        </button>
+        <button type="button" id="tabBtnGuide" class="nav-btn" style="border-radius:0;padding:10px 14px;font-size:13px;font-weight:700" onclick="switchManagerTab('guide')">
+          <span class="ms" style="font-size:17px">help_outline</span> Sheet Guide (শিটে কিভাবে লিখবেন)
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top:0;max-height:65vh;overflow-y:auto">
+        <!-- TAB 1: AD Accounts -->
+        <div id="managerTabAdAccounts">
+          <!-- Add Single AD Account -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:800;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+              <span class="ms" style="font-size:18px;color:var(--pri)">add_circle</span> Add New AD Account
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">AD Account Name *</label>
+                <input type="text" id="newAdAccountName" placeholder="e.g. Akash - Ad 01" style="min-height:36px">
+              </div>
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">ID Name / ID Number</label>
+                <input type="text" id="newAdAccountId" placeholder="e.g. ID: 98451241" style="min-height:36px">
+              </div>
+              <button class="btn btn-primary" type="button" onclick="submitNewAdAccount()" style="min-height:36px;white-space:nowrap">
+                <span class="ms" style="font-size:16px">add</span> Save Account
+              </button>
+            </div>
+          </div>
+
+          <!-- Bulk Paste AD Accounts Accordion -->
+          <details style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:12px 16px;margin-bottom:16px">
+            <summary style="font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">
+              <span class="ms" style="font-size:17px;color:var(--wrn)">content_paste</span> Bulk Import AD Accounts (একসাথে একাধিক অ্যাকাউন্ট পেস্ট করুন)
+            </summary>
+            <div style="margin-top:12px">
+              <p style="font-size:12px;color:var(--txt-muted);margin:0 0 8px">
+                প্রতি লাইনে <code>Account Name, ID Name</code> বা শুধু <code>Account Name</code> লিখে পেস্ট করুন:
+              </p>
+              <textarea id="bulkAdAccountsInput" rows="4" placeholder="Akash - Ad 01, ID: 102938192&#10;Agency Global 02, ID: 293847182&#10;Agency Account 03" style="width:100%;font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--input-bg);color:var(--txt);border:1px solid var(--bor)"></textarea>
+              <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <button class="btn btn-primary" type="button" onclick="submitBulkAdAccounts()">
+                  <span class="ms" style="font-size:16px">upload</span> Import All AD Accounts
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <!-- List of AD Accounts -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt)">Saved AD Accounts List:</div>
+            <input type="text" id="searchAdAccounts" placeholder="Search accounts..." oninput="filterAdAccountsList(this.value)" style="width:200px;min-height:32px;font-size:12px;padding:4px 8px">
+          </div>
+          <div style="border:1px solid var(--bor);border-radius:12px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:var(--card-elevated);border-bottom:1px solid var(--bor);text-align:left">
+                  <th style="padding:10px 12px">AD Account Name</th>
+                  <th style="padding:10px 12px">ID Name / Info</th>
+                  <th style="padding:10px 12px;text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="adAccountsTableBody">
+                <tr><td colspan="3" style="text-align:center;padding:20px;color:var(--txt-muted)">Loading AD Accounts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 2: Page List -->
+        <div id="managerTabPages" class="hidden">
+          <!-- Add Single Page -->
+          <div style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:800;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;color:var(--txt)">
+              <span class="ms" style="font-size:18px;color:var(--pri)">add_circle</span> Add New Page Name
+            </div>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end">
+              <div class="form-field" style="margin:0">
+                <label style="font-size:11.5px">Facebook Page Name *</label>
+                <input type="text" id="newPageNameInput" placeholder="e.g. Trendy Lifestyle BD" style="min-height:36px">
+              </div>
+              <button class="btn btn-primary" type="button" onclick="submitNewPageName()" style="min-height:36px;white-space:nowrap">
+                <span class="ms" style="font-size:16px">add</span> Save Page
+              </button>
+            </div>
+          </div>
+
+          <!-- Bulk Paste Pages Accordion -->
+          <details style="background:var(--card-elevated);border:1px solid var(--bor);border-radius:14px;padding:12px 16px;margin-bottom:16px">
+            <summary style="font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">
+              <span class="ms" style="font-size:17px;color:var(--wrn)">content_paste</span> Bulk Import Pages (একসাথে ৫০+ পেজ পেস্ট করুন)
+            </summary>
+            <div style="margin-top:12px">
+              <p style="font-size:12px;color:var(--txt-muted);margin:0 0 8px">
+                প্রতি লাইনে একটি করে পেজের নাম লিখে বা কপি করে পেস্ট করুন:
+              </p>
+              <textarea id="bulkPagesInput" rows="5" placeholder="Page Name 1&#10;Page Name 2&#10;Page Name 3&#10;Page Name 4" style="width:100%;font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--input-bg);color:var(--txt);border:1px solid var(--bor)"></textarea>
+              <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <button class="btn btn-primary" type="button" onclick="submitBulkPages()">
+                  <span class="ms" style="font-size:16px">upload</span> Import All Pages
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <!-- List of Pages -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:13px;color:var(--txt)">Saved Page Names List:</div>
+            <input type="text" id="searchPages" placeholder="Search pages..." oninput="filterPagesList(this.value)" style="width:200px;min-height:32px;font-size:12px;padding:4px 8px">
+          </div>
+          <div style="border:1px solid var(--bor);border-radius:12px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:var(--card-elevated);border-bottom:1px solid var(--bor);text-align:left">
+                  <th style="padding:10px 12px">#</th>
+                  <th style="padding:10px 12px">Page Name</th>
+                  <th style="padding:10px 12px;text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="pagesTableBody">
+                <tr><td colspan="3" style="text-align:center;padding:20px;color:var(--txt-muted)">Loading Pages...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 3: Google Sheets Guide -->
+        <div id="managerTabGuide" class="hidden">
+          <div style="background:var(--card-elevated);border-radius:14px;padding:18px;border:1px solid var(--bor)">
+            <h4 style="margin:0 0 12px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:6px;color:var(--pri)">
+              <span class="ms">table_chart</span> Google Sheet এ কিভাবে Ad Account ও Page Name সাজাবেন?
+            </h4>
+            
+            <p style="font-size:13px;line-height:1.6;color:var(--txt);margin:0 0 14px">
+              আপনি চাইলে সরাসরি আপনার সংযুক্ত Google Sheet এর ভেতরেও Ad Account ও Page Name লিখে রাখতে পারেন। অ্যাপ স্বয়ংক্রিয়ভাবে সেখান থেকে ড্রপডাউনে ডাটা লোড করে নেবে:
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+              <!-- Sheet 1: Ad Accounts -->
+              <div style="background:var(--card);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:14px">
+                <div style="font-weight:800;font-size:13px;color:var(--pri);margin-bottom:8px">
+                  1. <code>Ad Accounts</code> শিট ট্যাব:
+                </div>
+                <div style="font-size:12px;color:var(--txt-muted);margin-bottom:8px">
+                  শিটের নাম দিন: <b>Ad Accounts</b>
+                </div>
+                <div style="background:var(--input-bg);padding:8px;border-radius:6px;font-family:monospace;font-size:11.5px;line-height:1.5">
+                  <b>Column A:</b> Ad Account<br>
+                  <b>Column B:</b> ID Name
+                </div>
+              </div>
+
+              <!-- Sheet 2: Page List -->
+              <div style="background:var(--card);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:14px">
+                <div style="font-weight:800;font-size:13px;color:var(--suc);margin-bottom:8px">
+                  2. <code>Page List</code> শিট ট্যাব:
+                </div>
+                <div style="font-size:12px;color:var(--txt-muted);margin-bottom:8px">
+                  শিটের নাম দিন: <b>Page List</b>
+                </div>
+                <div style="background:var(--input-bg);padding:8px;border-radius:6px;font-family:monospace;font-size:11.5px;line-height:1.5">
+                  <b>Column A:</b> Page Name
+                </div>
+              </div>
+            </div>
+
+            <!-- Auto-learning Note -->
+            <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:12px;display:flex;gap:10px;align-items:flex-start">
+              <span class="ms" style="color:var(--wrn);font-size:20px;margin-top:2px">lightbulb</span>
+              <div style="font-size:12.5px;color:var(--txt);line-height:1.5">
+                <b>স্মার্ট অটো-সেভ সুবিধা:</b> যখনই আপনি অ্যাপ থেকে নতুন কোনো Page Name বা Ad Account ব্যবহার করে কোনো ক্যাম্পেইন সেভ করবেন, সিস্টেম স্বয়ংক্রিয়ভাবে সেটি আপনার পেজ ও অ্যাকাউন্ট লিস্টে যুক্ত করে নেবে এবং পরবর্তী ক্যাম্পেইনে ড্রপডাউনে সাজেশন হিসেবে দেখাবে!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeAdAccountsPagesModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <?!= include('javascript'); ?>
+</body>
+</html>
