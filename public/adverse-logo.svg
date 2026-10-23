@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Radial Gradient -->
+    <radialGradient id="slateGlowFull" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#404656" />
+      <stop offset="55%" stop-color="#2D323E" />
+      <stop offset="100%" stop-color="#1B1E26" />
+    </radialGradient>
+
+    <!-- Vibrant Red Gradients -->
+    <linearGradient id="redFrontFull" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FF385C" />
+      <stop offset="40%" stop-color="#ED1C3F" />
+      <stop offset="100%" stop-color="#C70F30" />
+    </linearGradient>
+
+    <linearGradient id="redShadeFull" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#800618" />
+      <stop offset="100%" stop-color="#4D020D" />
+    </linearGradient>
+
+    <linearGradient id="stepGradFull" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF476B" />
+      <stop offset="100%" stop-color="#B80E28" />
+    </linearGradient>
+
+    <!-- Metallic Silver Gradients for "ADVERSE" Text -->
+    <linearGradient id="silverChrome" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="45%" stop-color="#F2F5F9" />
+      <stop offset="50%" stop-color="#D1D7E3" />
+      <stop offset="100%" stop-color="#A8B0C0" />
+    </linearGradient>
+
+    <linearGradient id="silverAgency" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#D0D6E2" />
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="logoShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000000" flood-opacity="0.6" />
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+
+    <filter id="textShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.75" />
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Slate Canvas -->
+  <rect width="512" height="512" rx="108" fill="url(#slateGlowFull)" />
+  <rect x="2" y="2" width="508" height="508" rx="106" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+
+  <!-- Emblem Scaled and Positioned Upwards to fit "ADVERSE AGENCY" -->
+  <g filter="url(#logoShadow)" transform="translate(256, 175) scale(0.72) translate(-256, -175)">
+    <!-- 3D Depth Underlay -->
+    <g transform="translate(4, 9)" opacity="0.95">
+      <polygon points="152,246 166,246 166,260 152,260" fill="url(#redShadeFull)" />
+      <polygon points="172,218 186,218 186,232 172,232" fill="url(#redShadeFull)" />
+      <polygon points="192,190 206,190 206,204 192,204" fill="url(#redShadeFull)" />
+      <polygon points="212,162 226,162 226,176 212,176" fill="url(#redShadeFull)" />
+      <path d="M 240,78 L 276,140 L 316,196 L 340,148 L 362,88 L 364,188 L 332,236 L 332,284 L 294,228 L 240,168 L 186,228 L 154,284 L 138,260 Z" fill="url(#redShadeFull)" />
+    </g>
+
+    <!-- Main Front Surface -->
+    <rect x="148" y="238" width="22" height="22" rx="2" fill="url(#stepGradFull)" stroke="#FFA0B2" stroke-width="1.2" />
+    <rect x="168" y="210" width="22" height="22" rx="2" fill="url(#stepGradFull)" stroke="#FFA0B2" stroke-width="1.2" />
+    <rect x="188" y="182" width="22" height="22" rx="2" fill="url(#stepGradFull)" stroke="#FFA0B2" stroke-width="1.2" />
+    <rect x="208" y="154" width="22" height="22" rx="2" fill="url(#stepGradFull)" stroke="#FFA0B2" stroke-width="1.2" />
+
+    <path d="M 238,72 L 312,188 L 296,218 L 242,164 L 194,218 L 156,270 L 134,248 L 194,152 L 238,72 Z" fill="url(#redFrontFull)" />
+    <path d="M 242,164 L 296,218 L 312,188 L 326,146 L 358,82 L 358,180 L 330,224 L 330,270 L 294,220 L 242,164 Z" fill="url(#redFrontFull)" />
+    <polygon points="358,74 366,176 334,142 308,172 322,130" fill="url(#redFrontFull)" />
+    <polygon points="358,74 366,176 348,154" fill="#C00C29" />
+    <path d="M 238,72 L 244,78 L 202,156 L 194,152 Z" fill="#FF8CA3" opacity="0.75" />
+    <path d="M 238,72 L 244,78 L 314,192 L 312,188 Z" fill="#B30924" opacity="0.9" />
+    <polygon points="242,164 290,214 242,176 196,214" fill="#750516" opacity="0.9" />
+  </g>
+
+  <!-- Typography "ADVERSE" with Metallic Bevel & 3D Shadow -->
+  <g filter="url(#textShadow)">
+    <text x="256" y="388" 
+          font-family="system-ui, -apple-system, 'Montserrat', 'Arial Black', sans-serif" 
+          font-weight="900" 
+          font-size="64" 
+          letter-spacing="5" 
+          text-anchor="middle" 
+          fill="url(#silverChrome)"
+          stroke="#FFFFFF"
+          stroke-width="0.75">
+      ADVERSE
+    </text>
+
+    <!-- Typography "AGENCY" -->
+    <text x="256" y="442" 
+          font-family="system-ui, -apple-system, 'Montserrat', 'Arial Black', sans-serif" 
+          font-weight="800" 
+          font-size="34" 
+          letter-spacing="14" 
+          text-anchor="middle" 
+          fill="url(#silverAgency)">
+      AGENCY
+    </text>
+  </g>
+</svg>
