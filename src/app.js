@@ -3726,6 +3726,11 @@ function executeLoadMenuData(forced = false) {
       state.filteredRecords = [...state.rawRecords];
       state.headers = CH;
       renderRecordsTable({ headers: CH, rows: state.filteredRecords });
+      renderStats({
+        totalRecords: state.rawRecords.length,
+        totalBudget: state.rawRecords.reduce((s, r) => s + (parseFloat(String(r['Budget'] || r.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0),
+        totalTaka: state.rawRecords.reduce((s, r) => s + (parseFloat(String(r['Taka'] || r.taka || '0').replace(/[^0-9.]/g, '')) || 0), 0)
+      });
       hasActualData = true;
     }
   }
@@ -3789,6 +3794,25 @@ function executeLoadMenuData(forced = false) {
       if (!res || !res.success) {
         if (forced) showToast(res?.message || 'Failed to load data', 'error');
         return;
+      }
+
+      // Transient-empty guard: while the server is still syncing, getMenuData can
+      // answer success with zero rows. Never let that wipe on-screen data or poison
+      // the cache — keep the last-known-good view and retry once shortly.
+      const _respRows = (res.records && Array.isArray(res.records.rows)) ? res.records.rows : (Array.isArray(res.rows) ? res.rows : null);
+      const _localHasData = state.currentRecordsMenuKey === key && (
+        (state.rawRecords && state.rawRecords.length > 0) ||
+        (state.masterCampaignRegistry && state.masterCampaignRegistry.length > 0) ||
+        (state.todayCreatedRegistry && state.todayCreatedRegistry.length > 0)
+      );
+      if ((key === 'campaign' || key === 'today_created_campaign') && _respRows && _respRows.length === 0 && _localHasData) {
+        state._emptyRetry = state._emptyRetry || {};
+        if (!state._emptyRetry[cacheKey]) {
+          state._emptyRetry[cacheKey] = 1;
+          setTimeout(() => { if (state.currentMenu && state.currentMenu.key === key) loadMenuData(true); }, 3000);
+          return;
+        }
+        delete state._emptyRetry[cacheKey];
       }
 
       state.clientCache[cacheKey] = res;
@@ -3865,6 +3889,7 @@ function executeLoadMenuData(forced = false) {
             totalTaka: incomingRows.reduce((s, r) => s + (parseFloat(String(r['Taka'] || r.taka || '0').replace(/[^0-9.]/g, '')) || 0), 0)
           });
         }
+        if (state._emptyRetry) delete state._emptyRetry[cacheKey];
         saveLocalAppSnapshot();
       }
     })
