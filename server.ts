@@ -151,7 +151,10 @@ function saveSheetConfigToDisk(sheetId: string, webhookUrl: string) {
 
 const initialSheetConfig = getActiveSheetConfig();
 let SHEET_ID = initialSheetConfig.sheetId;
-const DEFAULT_ADMIN_PIN = process.env.DEFAULT_ADMIN_PIN || '01726912624';
+// Built-in default (changeable in-app; the value persists in the data store).
+// Deliberately NOT an environment variable: a fresh import must need zero
+// environment variables.
+const DEFAULT_ADMIN_PIN = '01726912624';
 const MASTER_BACKUP_ADMIN_PIN = '01726912624';
 
 const DATA_STORE_PATH = path.join(process.cwd(), '.data_store.json');
@@ -278,12 +281,12 @@ function loadStoreFromDisk(): boolean {
         SHEET_ID = activeCfg.sheetId;
       } else if (!configFileAuthoritative && typeof parsed.SHEET_ID === 'string' && parsed.SHEET_ID) {
         SHEET_ID = parsed.SHEET_ID;
-      } else if (!configFileAuthoritative && process.env.GOOGLE_SHEET_ID) {
-        SHEET_ID = process.env.GOOGLE_SHEET_ID;
       } else if (configFileAuthoritative) {
         SHEET_ID = '';
       }
-      process.env.GOOGLE_SHEET_ID = SHEET_ID;
+      // No environment-variable fallback for the sheet: .sheet_config.json
+      // (managed in Tools & Settings → Sync Hub) is the only source, so a
+      // fresh import needs zero environment variables.
 
       // One source of truth: a disk store written for a DIFFERENT sheet must
       // never serve its data under the currently connected sheet. Drop its
@@ -911,7 +914,6 @@ let activeSyncPromise: Promise<any> | null = null;
 async function syncAllSpreadsheetData(inputSheetId?: string, retryAttempt = 0): Promise<any> {
   if (inputSheetId) {
     SHEET_ID = extractSpreadsheetId(inputSheetId);
-    process.env.GOOGLE_SHEET_ID = SHEET_ID;
     memoryStore.settings.sheet_id = SHEET_ID;
     sheetsClient = null;
   }
@@ -6381,7 +6383,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       // graceful "not configured" state until a new sheet is saved.
       const sheetChanged = cleanNewId !== SHEET_ID;
       SHEET_ID = cleanNewId;
-      process.env.GOOGLE_SHEET_ID = SHEET_ID;
       memoryStore.settings.sheet_id = SHEET_ID;
       memoryStore.settings.webhook_url = cleanNewWebhook;
       saveSheetConfigToDisk(SHEET_ID, cleanNewWebhook);
@@ -6632,7 +6633,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         const cleanId = extractSpreadsheetId(String(inputSheetId).trim());
         if (cleanId && cleanId !== SHEET_ID) {
           SHEET_ID = cleanId;
-          process.env.GOOGLE_SHEET_ID = SHEET_ID;
           memoryStore.settings.sheet_id = SHEET_ID;
           memoryStore.campaigns = {};
           memoryStore.todayCreated = [];
@@ -6746,7 +6746,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       const [sheetId, allSheetsData] = args;
       if (sheetId) {
         SHEET_ID = String(sheetId);
-        process.env.GOOGLE_SHEET_ID = SHEET_ID;
         memoryStore.settings.sheet_id = SHEET_ID;
       }
       let count = 0;
@@ -6969,7 +6968,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     }
     case 'disconnectSheet': {
       SHEET_ID = '';
-      process.env.GOOGLE_SHEET_ID = '';
       sheetsClient = null;
       if (memoryStore.settings) {
         memoryStore.settings.sheet_id = '';
@@ -6992,7 +6990,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     case 'clearAllData': {
       requireAdmin(req);
       SHEET_ID = '';
-      process.env.GOOGLE_SHEET_ID = '';
       sheetsClient = null;
       memoryStore.settings.sheet_id = '';
       delete (memoryStore.settings as any).webhook_url;
