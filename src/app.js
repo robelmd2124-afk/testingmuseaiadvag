@@ -2577,19 +2577,29 @@ function loadAppData(retryCount = 0) {
       try {
         const dataTag = localStorage.getItem('adverse_data_sheet_id') || '';
         if (dataTag !== data.sheetId) {
-          const hadPersisted = !!(dataTag || localStorage.getItem(SNAPSHOT_STORAGE_KEY) || localStorage.getItem('adverse_master_campaigns_v2') || localStorage.getItem('adverse_today_created_v2'));
-          if (hadPersisted) {
-            ['campaign', 'today_created_campaign', 'end_ads', 'page_summery', 'payment_due_tracker', 'agency_spending'].forEach(m => { try { localStorage.removeItem(`adverse_cache_${m}`); } catch (_) {} });
-            localStorage.removeItem('adverse_master_campaigns_v2');
-            localStorage.removeItem('adverse_today_created_v2');
-            localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
-            localStorage.removeItem('adverse_app_snapshot_v2');
-            state.clientCache = {};
-            state.masterCampaignRegistry = [];
-            state.campaignRegistry = [];
-            state.todayCreatedRegistry = [];
+          // NEVER-0 RULE (2026-10-25): purge old caches ONLY once the new
+          // sheet's data has actually arrived. Wiping first and trusting the
+          // repopulation "right after" leaves the whole app at 0 whenever
+          // that repopulation is slow or fails — and the wipe itself
+          // destroys the last-known-good copy. Until new data is in hand,
+          // keep the old caches and the old tag (stale beats 0); the purge
+          // then happens on the first load that actually carries new data.
+          const newDataArrived = Array.isArray(data.allCampaigns) && data.allCampaigns.length > 0;
+          if (newDataArrived) {
+            const hadPersisted = !!(dataTag || localStorage.getItem(SNAPSHOT_STORAGE_KEY) || localStorage.getItem('adverse_master_campaigns_v2') || localStorage.getItem('adverse_today_created_v2'));
+            if (hadPersisted) {
+              ['campaign', 'today_created_campaign', 'end_ads', 'page_summery', 'payment_due_tracker', 'agency_spending'].forEach(m => { try { localStorage.removeItem(`adverse_cache_${m}`); } catch (_) {} });
+              localStorage.removeItem('adverse_master_campaigns_v2');
+              localStorage.removeItem('adverse_today_created_v2');
+              localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+              localStorage.removeItem('adverse_app_snapshot_v2');
+              state.clientCache = {};
+              state.masterCampaignRegistry = [];
+              state.campaignRegistry = [];
+              state.todayCreatedRegistry = [];
+            }
+            localStorage.setItem('adverse_data_sheet_id', data.sheetId);
           }
-          localStorage.setItem('adverse_data_sheet_id', data.sheetId);
         }
       } catch (_) {}
       state.sheetId = data.sheetId;
@@ -3823,23 +3833,29 @@ function executeLoadMenuData(forced = false) {
         return;
       }
 
-      // Transient-empty guard: while the server is still syncing, getMenuData can
-      // answer success with zero rows. Never let that wipe on-screen data or poison
-      // the cache — keep the last-known-good view and retry once shortly.
+      // Transient-empty guard (ALL menus): while the server is still syncing,
+      // getMenuData can answer success with zero rows. Never let that wipe
+      // on-screen data or poison the cache — keep the last-known-good view
+      // and retry once shortly. Page Summary previously had no guard here,
+      // so one empty response zeroed all its cards and poisoned its cache.
       const _respRows = (res.records && Array.isArray(res.records.rows)) ? res.records.rows : (Array.isArray(res.rows) ? res.rows : null);
-      const _localHasData = state.currentRecordsMenuKey === key && (
-        (state.rawRecords && state.rawRecords.length > 0) ||
+      const _respEmpty = (key === 'end_ads' && res.records)
+        ? ((res.records.today || []).length === 0 && (res.records.tomorrow || []).length === 0 && ((res.records.all || res.records.rows || []).length === 0))
+        : !!(_respRows && _respRows.length === 0);
+      const _localHasData = (
+        (state.rawRecords && state.rawRecords.length > 0 && state.currentRecordsMenuKey === key) ||
         (state.masterCampaignRegistry && state.masterCampaignRegistry.length > 0) ||
         (state.todayCreatedRegistry && state.todayCreatedRegistry.length > 0)
       );
-      if ((key === 'campaign' || key === 'today_created_campaign') && _respRows && _respRows.length === 0 && _localHasData) {
+      // A forced refresh is the user's explicit request for fresh data, so it
+      // may render empty; background loads never may while local data exists.
+      if (_respEmpty && _localHasData && !forced) {
         state._emptyRetry = state._emptyRetry || {};
         if (!state._emptyRetry[cacheKey]) {
           state._emptyRetry[cacheKey] = 1;
-          setTimeout(() => { if (state.currentMenu && state.currentMenu.key === key) loadMenuData(true); }, 3000);
-          return;
+          setTimeout(() => { if (state.currentMenu && state.currentMenu.key === key) loadMenuData(false); }, 3000);
         }
-        delete state._emptyRetry[cacheKey];
+        return;
       }
 
       state.clientCache[cacheKey] = res;
