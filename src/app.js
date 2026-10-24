@@ -3363,7 +3363,7 @@ function selectMenu(key) {
     } else if (key === 'agency_spending') {
       renderAgencyCalculationView(cached.stats || cached.records);
     } else if (key === 'payment_due_tracker' && cached.records) {
-      renderPaymentHistoryTable(cached.records, cached.stats);
+      renderPaymentHistoryTable({ ...cached.records, rows: filterPaymentRowsBySelectedMonth(cached.records.rows) }, cached.stats);
     } else if (cached.records) {
       state.rawRecords = (cached.records.rows || []).filter(r => isValidClientRow(r, key));
       state.rawRecords.forEach(r => {
@@ -3782,8 +3782,9 @@ function executeLoadMenuData(forced = false) {
       renderAgencyCalculationView(cached.stats || cached.records);
       hasActualData = !!(cached.stats && (cached.stats.totalCampaign > 0 || cached.stats.totalBudget > 0 || cached.stats.totalTaka > 0));
     } else if (key === 'payment_due_tracker' && cached.records) {
-      renderPaymentHistoryTable(cached.records, cached.stats);
-      hasActualData = !!(cached.records.rows && cached.records.rows.length > 0);
+      const _payRows = filterPaymentRowsBySelectedMonth(cached.records.rows);
+      renderPaymentHistoryTable({ ...cached.records, rows: _payRows }, cached.stats);
+      hasActualData = _payRows.length > 0;
     } else if (cached.records) {
       state.currentRecordsMenuKey = key;
       state.rawRecords = (cached.records.rows || []).filter(r => isValidClientRow(r, key));
@@ -3854,7 +3855,7 @@ function executeLoadMenuData(forced = false) {
         saveLocalAppSnapshot();
       } else if (key === 'payment_due_tracker' && res.records) {
         if (res.stats) renderStats(res.stats);
-        renderPaymentHistoryTable(res.records, res.stats);
+        renderPaymentHistoryTable({ ...res.records, rows: filterPaymentRowsBySelectedMonth(res.records.rows) }, res.stats);
         saveLocalAppSnapshot();
       } else if (res.records || res.rows) {
         state.currentRecordsMenuKey = key;
@@ -4998,6 +4999,28 @@ window.openInspectorModalForEndAd = function(type, idx) {
 window.filterEndAdsRows = function() {
   filterEndAdsFullTable();
 };
+
+// 2026-10-24 fix: the Payment menu must show ONLY the selected month.
+// The server already filters, but a stale cache could still hand over
+// all months' rows — so the menu view re-filters here too. 'All' (explicit
+// choice) still shows everything. Add/edit flows render their own
+// optimistic rows and do NOT go through this filter.
+function filterPaymentRowsBySelectedMonth(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const mSel = (state.filters.month || '').trim();
+  const ySel = (state.filters.year || '').trim();
+  if (!mSel || mSel === 'All' || mSel === 'All Months') return list;
+  return list.filter(r => {
+    const declaredMonth = (r['Month'] || r.month) ? String(r['Month'] || r.month).trim() : '';
+    const declaredYear = (r['Year'] || r.year) ? String(r['Year'] || r.year).trim() : '';
+    const dObj = parseAnyDate(r['Date'] || '', declaredMonth);
+    const rMonth = (declaredMonth && declaredMonth.toLowerCase() !== 'month') ? declaredMonth : (dObj ? MONTHS[dObj.getMonth()] : '');
+    const rYear = (declaredYear && declaredYear.toLowerCase() !== 'year') ? declaredYear : (dObj ? String(dObj.getFullYear()) : '');
+    const mOk = String(rMonth).toLowerCase() === mSel.toLowerCase();
+    const yOk = !ySel || ySel === 'All Years' || String(rYear) === ySel;
+    return mOk && yOk;
+  });
+}
 
 function renderPaymentHistoryTable(data, stats) {
   const thead = document.getElementById('paymentTableHead');
@@ -8807,8 +8830,11 @@ function addPaymentRecord() {
   state.currentPaymentRows = [optimisticPayment, ...state.currentPaymentRows];
   renderPaymentHistoryTable({ rows: state.currentPaymentRows }, state.currentStats);
 
-  // Instantly sync payment to Google Sheet
-  autoSyncDirectToGoogleSheets('Payments', PAYMENT_HEADERS, [optimisticPayment]).catch(() => {});
+  // NOTE (2026-10-24 fix): NO direct sheet write here. The server RPC below
+  // (addPayment) is the ONLY writer for payments — the old direct + server
+  // double-write could append the same payment twice (same amount counted
+  // twice = wrong dues/balance = real loss). The server dedupes by Record ID
+  // and by same amount+date+method within 60s.
 
   const payInput = document.getElementById('payAmount');
   if (payInput) payInput.value = '';
@@ -9699,7 +9725,9 @@ async function saveModalRecord() {
     }
     closeModal();
     showToast('Payment record updated successfully! ✅', 'success');
-    autoSyncDirectToGoogleSheets('Payments', PAYMENT_HEADERS, [updatedPayment]).catch(() => {});
+    // NOTE (2026-10-24 fix): NO direct sheet write here either — the server
+    // updatePayment below is the ONLY writer (updates the row in place by
+    // Record ID / row number, never appends), so an edit can never duplicate.
     google.script.run.withSuccessHandler(res => {
       state.cacheTimestamps = {};
       loadMenuData(true);

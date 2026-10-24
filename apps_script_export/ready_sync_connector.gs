@@ -161,6 +161,57 @@ function campaignRowStrongKey(headersLower, rowVals) {
   return sl + '|' + page + '|' + start + '|' + budgetNum + '|' + acct.trim();
 }
 
+// Payment-row content match (added 2026-10-24): the Payments tab has no
+// Record ID and no SL column, so Record-ID/SL matching can NEVER find a
+// payment row — deletes silently did nothing and edits appended duplicates.
+// Content matching (Date + Paid + Method + Month + Year + Note) identifies
+// the row. It only fires on payment-like tabs (exact 'date' column + a
+// 'paid' column + NO 'sl' column), so campaign rows are never affected.
+// Date is REQUIRED: without it a bare amount+month could hit the wrong row.
+// Identical twin rows (same content) are indistinguishable: deleting one
+// removes exactly one, leaving the other — which is the correct outcome.
+function paymentContentMatch(headersLower, rowVals, m) {
+  if (!m) return false;
+  if (headersLower.indexOf('date') === -1) return false;
+  if (headersLower.indexOf('sl') !== -1 || headersLower.indexOf('sl no') !== -1 || headersLower.indexOf('sl_no') !== -1) return false;
+  var hasPaid = false;
+  for (var i = 0; i < headersLower.length; i++) {
+    if (headersLower[i].indexOf('paid') !== -1) { hasPaid = true; break; }
+  }
+  if (!hasPaid) return false;
+  function col(name) {
+    var idx = headersLower.indexOf(name);
+    return idx === -1 ? '' : String(rowVals[idx] || '').trim();
+  }
+  function colLike(part) {
+    for (var i = 0; i < headersLower.length; i++) {
+      if (headersLower[i].indexOf(part) !== -1) return String(rowVals[i] || '').trim();
+    }
+    return '';
+  }
+  var mDate = m['Date'] || m.date || '';
+  var mPaid = (m['Paid (৳)'] !== undefined && m['Paid (৳)'] !== null && m['Paid (৳)'] !== '') ? m['Paid (৳)']
+    : (m['Paid'] !== undefined && m['Paid'] !== '' ? m['Paid']
+    : (m['paid_amount'] !== undefined && m['paid_amount'] !== '' ? m['paid_amount']
+    : (m.budget !== undefined && m.budget !== '' ? m.budget : '')));
+  if (!mDate || mPaid === '' || mPaid === null || mPaid === undefined) return false;
+  if (normalizeDateKey(col('date')) !== normalizeDateKey(mDate)) return false;
+  var rPaid = parseFloat(String(colLike('paid')).replace(/,/g, ''));
+  var mPaidNum = parseFloat(String(mPaid).replace(/,/g, ''));
+  if (isNaN(rPaid) || isNaN(mPaidNum) || Math.abs(rPaid - mPaidNum) > 0.01) return false;
+  var mMethod = m['Payment Method'] || m.payment_method || '';
+  if (mMethod && colLike('payment') && colLike('payment').toLowerCase() !== String(mMethod).trim().toLowerCase()) return false;
+  var mMonth = m['Month'] || m.month || '';
+  if (mMonth && col('month') && col('month').toLowerCase() !== String(mMonth).trim().toLowerCase()) return false;
+  var mYear = m['Year'] || m.year || '';
+  if (mYear && col('year') && String(col('year')).trim() !== String(mYear).trim()) return false;
+  var mNote = (m['Note'] !== undefined && m['Note'] !== null) ? m['Note'] : (m.note !== undefined && m.note !== null ? m.note : '');
+  if (mNote !== '' && mNote !== undefined && mNote !== null) {
+    if (col('note') !== String(mNote).trim()) return false;
+  }
+  return true;
+}
+
 function doPost(e) {
   var lock = null;
   var lockHeld = false;
@@ -340,6 +391,9 @@ function doPost(e) {
               } else { match = true; }
             }
             if (!match && updKey && campaignRowStrongKey(headers, rowVals) === updKey) match = true;
+            // Payment rows have no Record ID / SL, so match by full content
+            // (otherwise an edit that finds nothing APPENDS a duplicate).
+            if (!match && paymentContentMatch(headers, rowVals, m)) match = true;
 
             if (match) {
               sheet.getRange(i + 1, 1, 1, body.rowValues.length).setValues([body.rowValues]);
@@ -403,6 +457,8 @@ function doPost(e) {
             } else if (m["Record ID"] && rRecId && String(m["Record ID"]).trim() === rRecId) {
               match = true;
             }
+            // Payment rows have no Record ID / SL, so match by full content.
+            if (!match && paymentContentMatch(headers, rowVals, m)) match = true;
 
             if (match) {
               sheet.deleteRow(i + 1);

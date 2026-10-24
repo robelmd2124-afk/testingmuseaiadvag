@@ -2384,7 +2384,7 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
         sheetName: targetSheetTitle || name,
         rowNo: targetRowNo,
         recordId: recordId || row?.['Record ID'] || row?._recordId,
-        matchInfo: matchInfo || { SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'], month: row?.['Month'] || row?.month, year: row?.['Year'] || row?.year },
+        matchInfo: matchInfo || { SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'], month: row?.['Month'] || row?.month, year: row?.['Year'] || row?.year, Date: row?.Date, 'Payment Method': row?.['Payment Method'], 'Paid (৳)': row?.['Paid (৳)'], Month: row?.Month, Year: row?.Year, Note: row?.Note },
         headers,
         rowValues: formatRowValuesForSheet(headers, row, row?.Month || matchInfo?.month)
       });
@@ -3928,8 +3928,19 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }));
       pageSummaryList.sort((a, b) => (Number(b['Total Budget $']) || 0) - (Number(a['Total Budget $']) || 0));
 
-      // Payments
-      const paymentRows = (memoryStore.payments || []).filter(isValidPaymentRow);
+      // Payments — ONLY the current month (2026-10-24 fix): the preloaded
+      // Payment menu used to carry every month's rows at once, so the menu
+      // showed all months automatically and its Total Paid mixed all months.
+      // Other months load on demand when the month selector changes
+      // (getRecords 'payment_due_tracker' already filters by month).
+      const paymentRows = (memoryStore.payments || []).filter(isValidPaymentRow).filter(p => {
+        const declaredMonth = (p['Month'] || (p as any).month) ? String(p['Month'] || (p as any).month).trim() : '';
+        const declaredYear = (p['Year'] || (p as any).year) ? String(p['Year'] || (p as any).year).trim() : '';
+        const dObj = parseAnyDate(p['Date'] || '', declaredMonth);
+        const rMonth = (declaredMonth && declaredMonth.toLowerCase() !== 'month') ? declaredMonth : (dObj ? MONTHS[dObj.getMonth()] : '');
+        const rYear = (declaredYear && declaredYear.toLowerCase() !== 'year') ? declaredYear : (dObj ? String(dObj.getFullYear()) : '');
+        return String(rMonth).toLowerCase() === String(currentMn).toLowerCase() && String(rYear) === String(currentYr);
+      });
 
       const preloaded: { [key: string]: any } = {
         today_created_campaign: {
@@ -5701,11 +5712,49 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
 
       const rows = await readRows('Payments', PAYMENT_HEADERS);
       const r = rows.find(isMatch) || (Array.isArray(memoryStore.payments) ? memoryStore.payments.find(isMatch) : null) || clientRow;
+      // Full content: the Payments tab has no Record ID column, so the
+      // connector can only find the row by its content (see
+      // paymentContentMatch in the sync connector).
       const matchInfo = {
         'Record ID': cleanId || r?.['Record ID'] || r?._recordId,
         Date: r?.['Date'] || clientRow?.Date,
-        'Paid (৳)': r?.['Paid (৳)'] || clientRow?.['Paid (৳)']
+        'Payment Method': r?.['Payment Method'] || clientRow?.['Payment Method'],
+        'Paid (৳)': r?.['Paid (৳)'] || clientRow?.['Paid (৳)'],
+        Month: r?.['Month'] || clientRow?.Month,
+        Year: r?.['Year'] || clientRow?.Year,
+        Note: r?.['Note'] || clientRow?.Note || ''
       };
+
+      // Count-based verification (2026-10-24 fix): payments carry no Record
+      // ID in the sheet, so ID-based verification is impossible. The sheet
+      // must lose exactly one content-matching row — otherwise report
+      // failure honestly instead of claiming a delete that never landed
+      // (the old code returned success while the row stayed in the sheet).
+      // NOTE: readRows() serves in-memory data, so it CANNOT verify a sheet
+      // write — verification reads the sheet fresh via GViz instead.
+      const countGvizMatches = (gv: { headers: string[], rows: string[][] } | null) => {
+        if (!gv) return -1;
+        const lower = gv.headers.map(h => String(h || '').trim().toLowerCase());
+        const idx = (name: string, like?: string) => {
+          let i = lower.indexOf(name);
+          if (i !== -1) return i;
+          if (like) { for (let k = 0; k < lower.length; k++) if (lower[k].indexOf(like) !== -1) return k; }
+          return -1;
+        };
+        const dI = idx('date'), mI = idx('payment method', 'payment'), pI = idx('paid (৳)', 'paid'), moI = idx('month'), yI = idx('year');
+        if (dI === -1 || pI === -1) return -1;
+        const mPaid = parseFloat(String(matchInfo['Paid (৳)'] ?? 0).replace(/[^0-9.]/g, ''));
+        return gv.rows.filter(row => {
+          const sameDate = String(row[dI] || '').trim() === String(matchInfo.Date || '').trim();
+          const xPaid = parseFloat(String(row[pI] || '').replace(/[^0-9.]/g, ''));
+          const samePaid = !isNaN(xPaid) && !isNaN(mPaid) && Math.abs(xPaid - mPaid) < 0.01;
+          const sameMethod = mI === -1 || String(row[mI] || '').trim().toLowerCase() === String(matchInfo['Payment Method'] || '').trim().toLowerCase();
+          const sameMonth = moI === -1 || String(row[moI] || '').trim().toLowerCase() === String(matchInfo.Month || '').trim().toLowerCase();
+          const sameYear = yI === -1 || String(row[yI] || '').trim() === String(matchInfo.Year || '').trim();
+          return sameDate && samePaid && sameMethod && sameMonth && sameYear;
+        }).length;
+      };
+      const beforeCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, 'Payments')) : -1;
 
       await deleteRowAt('Payments', r?._row, cleanId, matchInfo);
       if (Array.isArray(memoryStore.payments)) {
@@ -5713,6 +5762,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }
       invalidateSheetCache('Payments');
       saveStoreToDisk();
+      const afterCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, 'Payments')) : -1;
+      if (beforeCount > 0 && afterCount >= 0 && afterCount !== beforeCount - 1) {
+        return { success: false, message: 'Payment delete did not reach the sheet (row still present). Please paste the latest sync connector and retry.' };
+      }
       return { success: true };
     }
     case 'addAdAccount': {
