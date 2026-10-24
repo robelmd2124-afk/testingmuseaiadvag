@@ -106,10 +106,78 @@ function pullAllAppDataToSheet() {
 /**
  * Webhook Post Entry Point: Receives live sync requests from web app (appendRow, updateRow, deleteRow)
  */
+// ---------------------------------------------------------------------------
+// Anti-double-write guard (added 2026-10-24): one manual Save used to reach
+// the sheet through parallel paths (browser-direct + server), each scanning
+// an empty sheet and appending the same SL twice (e.g. Fairy Style SL 10507:
+// a temp_ row + a UUID row, identical except Daily $). Two protections:
+//  1. A script lock serializes concurrent webhook writes, so scan-then-write
+//     is atomic across executions.
+//  2. A strong duplicate key (SL + Page + Start + Budget + AD Account) catches
+//     the same entry arriving under a DIFFERENT Record ID. All five parts must
+//     match, so genuinely distinct same-SL campaigns (e.g. two real Amar Sunnah
+//     rows sharing SL 10491 with different budgets/accounts, or two different
+//     pages sharing SL 10496) are NEVER merged.
+// ---------------------------------------------------------------------------
+function normalizeDateKey(v) {
+  if (v === undefined || v === null || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return '';
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2);
+  }
+  var s = String(v).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{1,2})[-/ .]([A-Za-z]{3,9}|\d{1,2})[-/ .](\d{2,4})$/);
+  if (m) {
+    var months = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+    var mon = m[2];
+    var mm = /^[0-9]+$/.test(mon) ? ('0' + parseInt(mon, 10)).slice(-2) : (months[mon.slice(0, 3).toLowerCase()] || '');
+    if (!mm) return '';
+    var yy = m[3].length === 2 ? '20' + m[3] : m[3];
+    return yy + '-' + mm + '-' + ('0' + parseInt(m[1], 10)).slice(-2);
+  }
+  var iso = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (iso) return iso[1] + '-' + ('0' + parseInt(iso[2], 10)).slice(-2) + '-' + ('0' + parseInt(iso[3], 10)).slice(-2);
+  return s;
+}
+
+function campaignRowStrongKey(headersLower, rowVals) {
+  function col(name) {
+    var i = headersLower.indexOf(name);
+    return i === -1 ? '' : String(rowVals[i] || '').trim();
+  }
+  var page = '';
+  for (var i = 0; i < headersLower.length; i++) {
+    if (headersLower[i].indexOf('page') !== -1) { page = String(rowVals[i] || '').trim().toLowerCase(); break; }
+  }
+  var slRaw = col('sl') || col('sl no') || col('sl_no') || String(rowVals[0] || '');
+  var sl = slRaw.replace(/\D/g, '');
+  var start = normalizeDateKey(col('start') || col('start date'));
+  var budgetRaw = col('budget');
+  var budgetNum = budgetRaw === '' ? '' : String(parseFloat(String(budgetRaw).replace(/,/g, '')));
+  if (budgetNum === 'NaN') budgetNum = String(budgetRaw).trim();
+  var acct = col('ad account');
+  if (!sl || !page || !start || !budgetNum || !acct) return '';
+  return sl + '|' + page + '|' + start + '|' + budgetNum + '|' + acct.trim();
+}
+
 function doPost(e) {
+  var lock = null;
+  var lockHeld = false;
   try {
     var raw = e && e.postData && e.postData.contents ? e.postData.contents : "{}";
     var body = JSON.parse(raw);
+    // Serialize concurrent webhook writes (see anti-double-write guard above).
+    var WRITE_ACTIONS = ['appendRow', 'upsertRow', 'updateRow', 'deleteRow', 'batch', 'pushAllData'];
+    if (body && WRITE_ACTIONS.indexOf(body.action) !== -1) {
+      lock = LockService.getScriptLock();
+      if (lock.tryLock(15000)) {
+        lockHeld = true;
+      } else {
+        return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'lock_timeout_retry' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     if (!ss) {
       return ContentService.createTextOutput(JSON.stringify({ success: false, error: "No active spreadsheet found." }))
@@ -204,6 +272,20 @@ function doPost(e) {
           }
         }
 
+        // Strong duplicate key: same entry under a DIFFERENT Record ID
+        // (the classic double-write signature) must update, never append.
+        if (existingIdx <= 1 && body.rowValues && body.headers) {
+          var inHeaders = body.headers.map(function(h) { return String(h || '').trim().toLowerCase(); });
+          var inKey = campaignRowStrongKey(inHeaders, body.rowValues);
+          if (inKey) {
+            var fresh = sheet.getDataRange().getValues();
+            var freshHeaders = fresh[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+            for (var k = 1; k < fresh.length; k++) {
+              if (campaignRowStrongKey(freshHeaders, fresh[k]) === inKey) { existingIdx = k + 1; break; }
+            }
+          }
+        }
+
         if (existingIdx > 1) {
           sheet.getRange(existingIdx, 1, 1, body.rowValues.length).setValues([body.rowValues]);
         } else {
@@ -234,6 +316,11 @@ function doPost(e) {
           }
           var targetId = String(body.recordId || "").trim();
           var m = body.matchInfo || {};
+          // Strong duplicate key (same entry, different Record ID).
+          var updKey = '';
+          if (body.rowValues && body.headers) {
+            updKey = campaignRowStrongKey(body.headers.map(function(h) { return String(h || '').trim().toLowerCase(); }), body.rowValues);
+          }
 
           for (var i = 1; i < data.length; i++) {
             var rowVals = data[i];
@@ -252,6 +339,7 @@ function doPost(e) {
                 if (mp === rPage || rPage.indexOf(mp) !== -1 || mp.indexOf(rPage) !== -1) match = true;
               } else { match = true; }
             }
+            if (!match && updKey && campaignRowStrongKey(headers, rowVals) === updKey) match = true;
 
             if (match) {
               sheet.getRange(i + 1, 1, 1, body.rowValues.length).setValues([body.rowValues]);
@@ -359,6 +447,8 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.message })).setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    try { if (lockHeld && lock) lock.releaseLock(); } catch (_) {}
   }
 }
 
