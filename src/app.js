@@ -3432,21 +3432,37 @@ function selectMenu(key) {
       });
     } else if (key === 'page_summery') {
       const pMap = {};
+      const latestByPage = {};
       masterList.forEach(c => {
         const p = c['Page Name'] || c.page_name || '';
         if (!p) return;
         if (!pMap[p]) pMap[p] = { 'Page Name': p, 'Total Ads': 0, 'Total Budget $': 0 };
         pMap[p]['Total Ads'] += 1;
         pMap[p]['Total Budget $'] += parseFloat(c['Budget'] || c.budget || 0) || 0;
+        // Latest-status classification (same rule as the server): each page
+        // counts once, under its latest campaign's status, so New + Old
+        // always equals Active — never the old double-count.
+        const dObj = (typeof parseAnyDate === 'function' ? parseAnyDate(c['Start'] || c['Start Date'] || c['Date'] || '') : null);
+        const t = dObj ? dObj.getTime() : 0;
+        const sl = parseInt(String(c.SL || c['SL NO'] || 0).replace(/\D/g, ''), 10) || 0;
+        const cur = latestByPage[p];
+        if (!cur || t > cur.t || (t === cur.t && sl >= cur.sl)) latestByPage[p] = { t, sl, status: String(c['Status'] || c.status || '').toLowerCase() };
       });
       const pageList = Object.values(pMap).sort((a, b) => b['Total Budget $'] - a['Total Budget $']);
+      let newPages = 0, newBudget = 0, oldPages = 0, oldBudget = 0;
+      Object.keys(pMap).forEach(p => {
+        if (latestByPage[p] && latestByPage[p].status === 'new page') { newPages++; newBudget += pMap[p]['Total Budget $']; }
+        else { oldPages++; oldBudget += pMap[p]['Total Budget $']; }
+      });
       state.rawRecords = pageList;
       state.filteredRecords = [...pageList];
       renderRecordsTable({ headers: PAGE_SUMMARY_HEADERS, rows: state.filteredRecords });
       renderStats({
         totalRecords: pageList.length,
         totalPages: pageList.length,
-        totalBudget: pageList.reduce((s, r) => s + r['Total Budget $'], 0)
+        totalBudget: pageList.reduce((s, r) => s + r['Total Budget $'], 0),
+        totalAds: masterList.filter(c => (c['Page Name'] || c.page_name || '')).length,
+        newPages, newBudget, oldPages, oldBudget
       });
     } else {
       state.rawRecords = [...masterList];

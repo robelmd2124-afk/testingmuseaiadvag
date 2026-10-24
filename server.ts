@@ -3199,6 +3199,45 @@ async function getRate(): Promise<number> {
   return Number(m.rate) || 140;
 }
 
+// Page Summary classification (2026-10-25): each page counts ONCE, under
+// its LATEST campaign's status in the set. The old code counted pages
+// per-row status, so a page with both a New and an Old campaign in the
+// month landed in BOTH buckets (Oct 2026: New 20 + Old 109 = 129 vs 116
+// distinct pages). With latest-status classification, New + Old ===
+// distinct pages and New budget + Old budget === total budget, always
+// (totals are derived from the buckets, so the sums hold by construction).
+function classifyPageSummary(rows: any[]) {
+  const byPage = new Map<string, { latest: any; budget: number }>();
+  const timeOf = (r: any) => {
+    const d = parseAnyDate(r['Start'] || r['Start Date'] || r['Date'] || '');
+    return d ? d.getTime() : 0;
+  };
+  const slOf = (r: any) => parseInt(String(r.SL || r['SL NO'] || 0).replace(/\D/g, ''), 10) || 0;
+  rows.forEach(r => {
+    const p = String(r['Page Name'] || '').trim();
+    if (!p) return;
+    const b = Number(r['Budget'] || 0) || 0;
+    const cur = byPage.get(p);
+    if (!cur) { byPage.set(p, { latest: r, budget: b }); return; }
+    cur.budget += b;
+    const tNew = timeOf(r), tCur = timeOf(cur.latest);
+    if (tNew > tCur || (tNew === tCur && slOf(r) >= slOf(cur.latest))) cur.latest = r;
+  });
+  let newPages = 0, newBudget = 0, oldPages = 0, oldBudget = 0;
+  const latestStatus = new Map<string, string>();
+  byPage.forEach((v, p) => {
+    if (String(v.latest['Status'] || '').toLowerCase() === 'new page') { newPages++; newBudget += v.budget; latestStatus.set(p, 'new'); }
+    else { oldPages++; oldBudget += v.budget; latestStatus.set(p, 'old'); }
+  });
+  return {
+    totalPages: byPage.size,
+    totalAds: rows.length,
+    totalBudget: newBudget + oldBudget,
+    newPages, newBudget, oldPages, oldBudget,
+    latestStatus
+  };
+}
+
 async function campaignRows(month?: string, year?: string | number): Promise<any[]> {
   const mLower = String(month || '').trim().toLowerCase();
   const yLower = String(year || '').trim().toLowerCase();
@@ -4024,6 +4063,9 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         'Total Budget $': s.budget
       }));
       pageSummaryList.sort((a, b) => (Number(b['Total Budget $']) || 0) - (Number(a['Total Budget $']) || 0));
+      // Same latest-status classification as getMenuStats, computed once so
+      // the cached cards match the fresh fetch exactly.
+      const pageSummaryCls = classifyPageSummary(curMonthRows);
 
       // Payments — ONLY the current month (2026-10-24 fix): the preloaded
       // Payment menu used to carry every month's rows at once, so the menu
@@ -4101,9 +4143,14 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           records: { headers: PAGE_SUMMARY_HEADERS, rows: pageSummaryList },
           stats: {
             success: true,
-            totalRecords: pageSummaryList.length,
-            totalPages: pageSummaryList.length,
-            totalBudget: curMonthRows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0),
+            totalRecords: pageSummaryCls.totalPages,
+            totalPages: pageSummaryCls.totalPages,
+            totalAds: pageSummaryCls.totalAds,
+            totalBudget: pageSummaryCls.totalBudget,
+            newPages: pageSummaryCls.newPages,
+            newBudget: pageSummaryCls.newBudget,
+            oldPages: pageSummaryCls.oldPages,
+            oldBudget: pageSummaryCls.oldBudget,
             currentMonth: currentMn,
             currentYear: currentYr
           }
@@ -4661,12 +4708,16 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }
       if (k === 'page_summery') {
         const rows = (await campaignRows(month, year)).filter(isValidCampaignRow);
+        const cls = classifyPageSummary(rows);
         const summaryMap: { [page: string]: { page: string; ads: number; budget: number } } = {};
         rows.forEach(r => {
           const p = r['Page Name'];
           if (!p) return;
-          if (f.pageType === 'new' && String(r['Status']).toLowerCase() !== 'new page') return;
-          if (f.pageType === 'old' && String(r['Status']).toLowerCase() !== 'old page') return;
+          // Table filter follows the same latest-status classification as
+          // the cards, so the table and the cards never disagree.
+          const bucket = cls.latestStatus.get(p);
+          if (f.pageType === 'new' && bucket !== 'new') return;
+          if (f.pageType === 'old' && bucket !== 'old') return;
           if (!summaryMap[p]) summaryMap[p] = { page: p, ads: 0, budget: 0 };
           summaryMap[p].ads += 1;
           summaryMap[p].budget += Number(r['Budget'] || 0);
@@ -5059,19 +5110,16 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }
       if (k === 'page_summery') {
         const rows = (await campaignRows(mn, yr)).filter(isValidCampaignRow);
-        const totalBudget = rows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0);
-        const pages = new Set(rows.map(r => r['Page Name']).filter(Boolean));
-        const newRows = rows.filter(r => String(r['Status']).toLowerCase() === 'new page');
-        const oldRows = rows.filter(r => String(r['Status']).toLowerCase() === 'old page');
+        const cls = classifyPageSummary(rows);
         return {
           success: true,
-          totalRecords: pages.size,
-          totalAds: rows.length,
-          totalBudget,
-          newPages: new Set(newRows.map(r => r['Page Name'])).size,
-          newBudget: newRows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0),
-          oldPages: new Set(oldRows.map(r => r['Page Name'])).size,
-          oldBudget: oldRows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0)
+          totalRecords: cls.totalPages,
+          totalAds: cls.totalAds,
+          totalBudget: cls.totalBudget,
+          newPages: cls.newPages,
+          newBudget: cls.newBudget,
+          oldPages: cls.oldPages,
+          oldBudget: cls.oldBudget
         };
       }
       if (k === 'new_pages') {
