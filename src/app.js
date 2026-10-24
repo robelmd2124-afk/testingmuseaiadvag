@@ -570,7 +570,7 @@ let state = {
     try { return JSON.parse(localStorage.getItem('adverse_verifications') || '{}'); } catch(e) { return {}; }
   })(),
   verificationFilter: 'all',
-  dateFormat: (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-MM-YYYY',
+  dateFormat: (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YYYY',
   masterCampaignRegistry: Array.isArray(storedMasterCampaigns) ? storedMasterCampaigns : []
 };
 if (typeof window !== 'undefined') {
@@ -1015,7 +1015,7 @@ function getDateProximityBadge(dateVal) {
 }
 
 function getActiveDateFormat() {
-  return (state && state.dateFormat) || (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-MM-YYYY';
+  return (state && state.dateFormat) || (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YYYY';
 }
 
 function _formatDateObj(d, targetFmt) {

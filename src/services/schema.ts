@@ -226,7 +226,7 @@ export const SUPPORTED_DATE_FORMATS = [
   { id: 'D-Mon-YYYY', label: '1-Oct-2026 (D-Mon-YYYY)', example: '1-Oct-2026' }
 ];
 
-let globalActiveDateFormat = 'DD-MM-YYYY';
+let globalActiveDateFormat = 'DD-Mon-YYYY';
 
 export function setActiveDateFormat(fmt: string) {
   if (fmt && typeof fmt === 'string') {
@@ -240,7 +240,7 @@ export function getActiveDateFormat(): string {
 
 export function formatCustomDate(dateInput: any, monthHint?: string | number, formatOverride?: string): string {
   if (!dateInput && dateInput !== 0) return '';
-  const targetFormat = formatOverride || globalActiveDateFormat || 'DD-MM-YYYY';
+  const targetFormat = formatOverride || globalActiveDateFormat || 'DD-Mon-YYYY';
 
   let d: Date | null = null;
   if (dateInput instanceof Date) {

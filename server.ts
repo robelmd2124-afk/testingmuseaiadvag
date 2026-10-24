@@ -6949,23 +6949,93 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     case 'formatAllDates': {
       requireAdmin(req);
       const [chosenFormat] = args;
-      const targetFormat = chosenFormat || 'DD-MM-YYYY';
+      const targetFormat = chosenFormat || 'DD-Mon-YYYY';
       const targetUrl = memoryStore.settings.webhook_url;
-      if (targetUrl) {
-        try {
-          const response = await fetch(targetUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'formatAllDates', dateFormat: targetFormat }),
-            redirect: 'follow'
-          });
-          const txt = await response.text();
-          return { success: true, message: `✅ Google Sheet dates formatted to ${targetFormat}!`, raw: txt };
-        } catch (e: any) {
-          return { success: false, message: `⚠️ Webhook Error: ${e.message}` };
-        }
+      if (!targetUrl) {
+        return { success: true, message: `Date format set to ${targetFormat} in App settings. No webhook configured, so sheet dates were not rewritten.` };
       }
-      return { success: true, message: `✅ Date format set to ${targetFormat} in App settings.` };
+      // NOTE: the deployed connector has no 'formatAllDates' webhook action
+      // (unknown actions fall through to {success:true} with nothing done),
+      // so this RPC performs the rewrite itself: GViz read -> reformat date
+      // columns with the server's own parser/formatter -> pushAllData for
+      // changed tabs only -> fresh GViz verification. Non-date cells pass
+      // through byte-identical; unparseable cells are never blanked.
+      const sheetId = SHEET_ID || memoryStore.settings.sheet_id;
+      if (!sheetId) return { success: false, message: 'No sheet configured.' };
+      const isDateCol = (h: string) => {
+        const lower = String(h || '').trim().toLowerCase();
+        return lower === 'start' || lower === 'end' || lower === 'start date' || lower === 'end date' ||
+          lower === 'entry date' || lower === 'entry' || lower === 'date' || lower === 'billing date' ||
+          lower === 'closed at' || lower === 'payment date' || lower.slice(-5) === ' date' ||
+          lower.slice(0, 5) === 'date ' || lower === 'date/time';
+      };
+      const monthHintFrom = (tab: string) => {
+        for (const m of MONTHS) if (tab.toLowerCase().includes(m.toLowerCase())) return m;
+        return '';
+      };
+      try {
+        const candidates: string[] = [];
+        Object.keys(memoryStore.campaigns || {}).forEach(k => { if (k && !candidates.includes(k)) candidates.push(k); });
+        if (!candidates.length) {
+          // Memory not yet synced: try all month tabs for the current year (GViz ghost dedupe drops the missing ones)
+          MONTHS.forEach(m => candidates.push(`Campaign_${m}_${new Date().getFullYear()}`));
+        }
+        ['Payments', 'Pause_ADS', 'Scam', 'Agency_Cost', 'End_ADS'].forEach(n => { if (!candidates.includes(n)) candidates.push(n); });
+        const seen = new Set<string>();
+        const pushData: Record<string, string[][]> = {};
+        const perTab: Array<{ tab: string; cells: number; rows: number }> = [];
+        let totalCells = 0;
+        for (const tab of candidates) {
+          const fetched = await fetchSheetCsvGviz(sheetId, tab);
+          if (!fetched || !fetched.headers.length) continue;
+          // GViz silently returns the FIRST tab for unknown names: dedupe by content signature
+          const sig = fetched.headers.join(',') + '|' + fetched.rows.length + '|' + (fetched.rows[0] || []).join(',') + '|' + (fetched.rows[fetched.rows.length - 1] || []).join(',');
+          if (seen.has(sig)) continue;
+          seen.add(sig);
+          const dateIdx = fetched.headers.map((h, i) => isDateCol(h) ? i : -1).filter(i => i >= 0);
+          if (!dateIdx.length) continue;
+          const hint = monthHintFrom(tab);
+          let cells = 0; let rowsChanged = 0;
+          const outRows = fetched.rows.map(r => {
+            const nr = r.slice();
+            let rowTouched = false;
+            for (const ci of dateIdx) {
+              const v = String(nr[ci] ?? '').trim();
+              if (!v) continue;
+              const nv = formatCustomDate(v, hint, targetFormat);
+              if (nv && nv !== v) { nr[ci] = nv; cells++; rowTouched = true; }
+            }
+            if (rowTouched) rowsChanged++;
+            return nr;
+          });
+          if (cells > 0) { pushData[tab] = [fetched.headers, ...outRows]; perTab.push({ tab, cells, rows: rowsChanged }); totalCells += cells; }
+        }
+        if (!totalCells) {
+          return { success: true, message: `All sheet dates are already in ${targetFormat} format.`, tabsChecked: candidates.length, cellsChanged: 0 };
+        }
+        const response = await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'pushAllData', allSheetsData: pushData }),
+          redirect: 'follow'
+        });
+        const raw = await response.text();
+        let remaining = 0;
+        for (const tab of Object.keys(pushData)) {
+          const v = await fetchSheetCsvGviz(sheetId, tab);
+          if (!v) continue;
+          const dateIdx = v.headers.map((h, i) => isDateCol(h) ? i : -1).filter(i => i >= 0);
+          for (const r of v.rows) for (const ci of dateIdx) {
+            const cell = String(r[ci] ?? '').trim();
+            if (!cell) continue;
+            if (parseAnyDate(cell) && formatCustomDate(cell, monthHintFrom(tab), targetFormat) !== cell) remaining++;
+          }
+        }
+        for (const tab of Object.keys(pushData)) { try { invalidateSheetCache(tab); } catch (_) {} }
+        return { success: true, message: `Google Sheet dates formatted to ${targetFormat}: ${totalCells} cells in ${perTab.length} tabs (${perTab.map(p => `${p.tab}: ${p.cells}`).join(', ')}). Verification: ${remaining} non-conforming date cells remain.`, perTab, cellsChanged: totalCells, remainingNonConforming: remaining, raw };
+      } catch (e: any) {
+        return { success: false, message: `⚠️ Date-format migration failed: ${e.message}` };
+      }
     }
     case 'getAppsScriptCode': {
       const host = req.get('host') || 'localhost:3000';
