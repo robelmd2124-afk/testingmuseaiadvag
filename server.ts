@@ -2327,7 +2327,11 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
       if (r['Record ID'] && String(r['Record ID']).trim() === matchIdStr) return true;
       if (r._recordId && String(r._recordId).trim() === matchIdStr) return true;
     }
-    if (matchInfo) {
+    // SL+Page fallback is ONLY for rows with no known row number and no
+    // Record ID (legacy rows). With a row number or a Record ID, falling
+    // back to SL+Page would also purge a duplicate-SL twin — a different
+    // real entry that merely shares the number.
+    if (matchInfo && !targetRowNo && !matchIdStr) {
       if (matchInfo['Record ID'] && r['Record ID'] && String(r['Record ID']).trim() === String(matchInfo['Record ID']).trim()) return true;
       if (matchInfo.SL && (r.SL !== undefined || r['SL NO'] !== undefined || r.sl !== undefined || r.sl_no !== undefined)) {
         const rSl = String(r.SL || r['SL NO'] || r.sl || r.sl_no || '').trim();
@@ -2434,7 +2438,11 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
       if (r['Record ID'] && String(r['Record ID']).trim() === matchIdStr) return true;
       if (r._recordId && String(r._recordId).trim() === matchIdStr) return true;
     }
-    if (matchInfo) {
+    // SL+Page fallback is ONLY for rows with no known row number and no
+    // Record ID (legacy rows). With a row number or a Record ID, falling
+    // back to SL+Page would also purge a duplicate-SL twin — a different
+    // real entry that merely shares the number.
+    if (matchInfo && !targetRowNo && !matchIdStr) {
       if (matchInfo['Record ID'] && r['Record ID'] && String(r['Record ID']).trim() === String(matchInfo['Record ID']).trim()) return true;
       if (matchInfo.SL && (r.SL !== undefined || r['SL NO'] !== undefined || r.sl !== undefined || r.sl_no !== undefined)) {
         const rSl = String(r.SL || r['SL NO'] || r.sl || r.sl_no || '').trim();
@@ -2480,9 +2488,11 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
     return;
   }
 
-  // 2. Instant direct sync to webhook. The deployed Sync Connector v2.0 deletes by
-  // rowIndex only, so the app's tracked row number (refreshed from the sheet on every
-  // sync) is passed through; the Sheets-API path above still verifies by Record ID.
+  // 2. Instant direct sync to webhook. NOTE: the deployed Sync Connector v2.0
+  // does NOT delete by rowIndex — it scans by Record ID, then falls back to
+  // SL+Page matching, which can hit a duplicate-SL twin. The retry guard in
+  // step 3 below is what keeps a timed-out-but-landed delete from eating
+  // the twin.
   let synced = false;
   if (immediateSync) {
     try {
@@ -2498,7 +2508,15 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
   }
 
   // 3. Write-through to Google Sheets: AWAITED before returning (see appendRow).
+  // Twin-safe: if the direct call timed out but actually landed, the record
+  // is already gone from the sheet — retrying would make the connector's
+  // SL+Page fallback delete a duplicate-SL twin instead. Skip the retry.
   if (immediateSync && !synced) {
+    let alreadyGone = false;
+    try {
+      if (recordId) alreadyGone = await sheetRecordAlreadyGone(targetSheetTitle || name, recordId);
+    } catch (_) { /* on guard failure, still run the task */ }
+    if (!alreadyGone) {
     try {
       await executeServerSyncTask({
         action: 'delete',
@@ -2519,7 +2537,27 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
         matchInfo
       });
     }
+    } // end if (!alreadyGone)
   }
+}
+
+// Twin-safe delete guard: the Apps Script connector answers {success:true}
+// for deleteRow even when its scan matched nothing, and its SL+Page fallback
+// can match a DIFFERENT row sharing the SL (a duplicate-SL twin). A slow
+// first attempt (cold start past the 12s timeout) that actually landed must
+// never be retried into a second delete — so before any delete retry, the
+// sheet itself is checked: if the exact Record ID is already gone, the
+// delete is done and the retry is dropped. An unreadable sheet (null) never
+// counts as "gone" — when in doubt, the delete still runs.
+async function sheetRecordAlreadyGone(sheetName: string, recordId: string): Promise<boolean> {
+  if (!SHEET_ID || !recordId) return false;
+  const data = await fetchSheetCsvGviz(SHEET_ID, sheetName).catch(() => null);
+  if (!data) return false;
+  const headers = (data.headers || []).map(h => String(h || '').trim().toLowerCase());
+  const recCol = headers.indexOf('record id');
+  if (recCol < 0) return false;
+  const targetId = String(recordId).trim();
+  return !data.rows.some(r => String(r[recCol] || '').trim() === targetId);
 }
 
 // Fresh-read verification: does the physical Google Sheet tab still contain
@@ -2633,6 +2671,16 @@ async function executeServerSyncTask(task: Omit<ServerSyncTask, 'id' | 'retries'
   // Google Sheet tab, so a queued task for it is complete by definition.
   if (name === 'Today_Created' || name.toLowerCase().includes('today')) {
     return;
+  }
+
+  // Twin-safe: a queued delete whose exact Record ID is already gone from
+  // the sheet is complete — running it would let the connector's SL+Page
+  // fallback delete a duplicate-SL twin instead. (An unreadable sheet never
+  // counts as "gone", so the task still runs when verification is impossible.)
+  if (action === 'delete' && recordId) {
+    try {
+      if (await sheetRecordAlreadyGone(name, recordId)) return;
+    } catch (_) { /* on guard failure, still run the task */ }
   }
 
   // Queued tasks captured before a row number was known (e.g. a fresh record's first
