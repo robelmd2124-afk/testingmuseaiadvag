@@ -2349,6 +2349,34 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
     return false;
   };
 
+  // Capture the PRE-update row BEFORE memory is overwritten: the connector
+  // must match the row as it currently exists in the sheet (OLD content).
+  // Sending the NEW values as matchInfo would find nothing and the
+  // connector would APPEND a duplicate instead of updating in place.
+  const findOldRow = (list: any[]) => { const i = (list || []).findIndex(r => isMatch(r)); return i >= 0 ? list[i] : null; };
+  let oldRow: any = null;
+  if (name === 'Payments') oldRow = findOldRow(memoryStore.payments);
+  else if (name.startsWith('Campaign_') && memoryStore.campaigns[name]) oldRow = findOldRow(memoryStore.campaigns[name]);
+  else if (name === 'Today_Created') oldRow = findOldRow(memoryStore.todayCreated);
+  else if (name === 'Pause_ADS') oldRow = findOldRow(memoryStore.pauseAds);
+  else if (name === 'Scam') oldRow = findOldRow(memoryStore.scams);
+  else if (name === 'Agency_Cost') oldRow = findOldRow(memoryStore.agencyCosts);
+  // MatchInfo for the sheet write: OLD content for payment fields (see
+  // above), so content matching in the connector finds the existing row.
+  const syncMatchInfo = matchInfo || {
+    SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'],
+    month: row?.['Month'] || row?.month, year: row?.['Year'] || row?.year,
+    Date: oldRow?.Date || row?.Date,
+    'Payment Method': oldRow?.['Payment Method'] || row?.['Payment Method'],
+    'Paid (৳)': oldRow?.['Paid (৳)'] ?? row?.['Paid (৳)'],
+    Month: oldRow?.Month || row?.Month, Year: oldRow?.Year || row?.Year,
+    // Note: NO fallback to the new note — an old note that is empty/undefined
+    // must stay empty in matchInfo (the connector then skips the Note check).
+    // Falling back to the new note made content matching fail, so an edit
+    // that changed the note appended a duplicate instead of updating.
+    Note: oldRow?.Note
+  };
+
   if (name.startsWith('Campaign_') && memoryStore.campaigns[name]) {
     const idx = memoryStore.campaigns[name].findIndex(r => isMatch(r));
     if (idx >= 0) memoryStore.campaigns[name][idx] = { ...row, _row: targetRowNo || memoryStore.campaigns[name][idx]._row };
@@ -2384,7 +2412,7 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
         sheetName: targetSheetTitle || name,
         rowNo: targetRowNo,
         recordId: recordId || row?.['Record ID'] || row?._recordId,
-        matchInfo: matchInfo || { SL: row?.SL, 'Record ID': row?.['Record ID'], 'Page Name': row?.['Page Name'], month: row?.['Month'] || row?.month, year: row?.['Year'] || row?.year, Date: row?.Date, 'Payment Method': row?.['Payment Method'], 'Paid (৳)': row?.['Paid (৳)'], Month: row?.Month, Year: row?.Year, Note: row?.Note },
+        matchInfo: syncMatchInfo,
         headers,
         rowValues: formatRowValuesForSheet(headers, row, row?.Month || matchInfo?.month)
       });
@@ -2403,7 +2431,7 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
         row,
         rowNo: targetRowNo,
         recordId,
-        matchInfo,
+        matchInfo: syncMatchInfo,
         oauthToken: currentRequestOAuthToken || undefined
       });
     } catch (syncErr: any) {
@@ -2416,7 +2444,7 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
         row,
         rowNo: targetRowNo,
         recordId,
-        matchInfo
+        matchInfo: syncMatchInfo
       });
     }
   }
