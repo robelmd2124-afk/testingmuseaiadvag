@@ -2310,6 +2310,75 @@ function lookupKnownRowNo(name: string, recordId?: string): number | undefined {
   return undefined;
 }
 
+// ---- Payment tab rewrite fallback (2026-10-25) ----
+// The deployed connector may be an older generation that ignores content
+// matchInfo: its updateRow then APPENDS a duplicate and its deleteRow is a
+// no-op, while still returning {success:true}. The deterministic fix does
+// not depend on the connector's matching at all: fresh GViz read -> modify
+// exactly one row -> pushAllData rewrite -> fresh GViz verify. Payments is
+// ~100 values-only rows, so a full-tab rewrite is cheap and safe; headers
+// are preserved exactly (including the sheet's empty 6th header cell).
+// Serialized through a promise chain so two rewrites can never interleave
+// and clobber each other.
+let paymentRewriteChain: Promise<any> = Promise.resolve();
+function runPaymentRewrite<T>(fn: () => Promise<T>): Promise<T> {
+  const p = paymentRewriteChain.then(fn, fn);
+  paymentRewriteChain = p.catch(() => {});
+  return p;
+}
+function sameYMD(a: any, b: any): boolean {
+  const pa = parseAnyDate(a), pb = parseAnyDate(b);
+  if (pa && pb) return pa.getFullYear() === pb.getFullYear() && pa.getMonth() === pb.getMonth() && pa.getDate() === pb.getDate();
+  return String(a ?? '').trim() === String(b ?? '').trim();
+}
+function paymentContentRowMatches(row: string[], headers: string[], t: any): boolean {
+  const lower = headers.map(h => String(h || '').trim().toLowerCase());
+  const col = (name: string, like?: string) => {
+    let i = lower.indexOf(name);
+    if (i !== -1) return i;
+    if (like) { for (let k = 0; k < lower.length; k++) if (lower[k].indexOf(like) !== -1) return k; }
+    return -1;
+  };
+  const dI = col('date'), mI = col('payment method', 'payment'), pI = col('paid (৳)', 'paid'), moI = col('month'), yI = col('year');
+  // Note column: the sheet's 6th header cell is EMPTY (not 'Note'), so a
+  // header-name lookup misses it — fall back to the fixed Payments layout
+  // (index 5) when the row has that many columns.
+  let nI = col('note');
+  if (nI === -1 && row.length > 5) nI = 5;
+  if (dI === -1 || pI === -1) return false;
+  if (!sameYMD(row[dI], t.Date)) return false;
+  const tPaid = parseFloat(String(t['Paid (৳)'] ?? '').replace(/[^0-9.]/g, ''));
+  const xPaid = parseFloat(String(row[pI] || '').replace(/[^0-9.]/g, ''));
+  if (isNaN(tPaid) || isNaN(xPaid) || Math.abs(xPaid - tPaid) >= 0.01) return false;
+  if (mI !== -1 && String(t['Payment Method'] || '').trim() && String(row[mI] || '').trim().toLowerCase() !== String(t['Payment Method']).trim().toLowerCase()) return false;
+  if (moI !== -1 && String(t.Month || '').trim() && String(row[moI] || '').trim().toLowerCase() !== String(t.Month).trim().toLowerCase()) return false;
+  if (yI !== -1 && String(t.Year || '').trim() && String(row[yI] || '').trim() !== String(t.Year).trim()) return false;
+  // A non-empty target note must match exactly: a row that cannot show a
+  // note (short row, no note column) has an empty note and never matches.
+  if (String(t.Note || '').trim()) {
+    if (nI === -1) return false;
+    if (String(row[nI] || '').trim() !== String(t.Note).trim()) return false;
+  }
+  return true;
+}
+async function rewritePaymentsTab(headers: string[], rows: string[][]): Promise<boolean> {
+  const targetUrl = memoryStore.settings.webhook_url;
+  if (!targetUrl) return false;
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pushAllData', allSheetsData: { Payments: [headers, ...rows] } }),
+      redirect: 'follow',
+      signal: AbortSignal.timeout(30000)
+    });
+    const text = await res.text();
+    if (!res.ok) return false;
+    try { const p = JSON.parse(text); if (p && (p.success === false || p.error)) return false; } catch (_) {}
+    return true;
+  } catch (_) { return false; }
+}
+
 async function updateRowAt(name: string, headers: string[], rowNo?: number, row?: any, recordId?: string, matchInfo?: any, immediateSync = true): Promise<void> {
   invalidateSheetCache(name);
   if (row) row = normalizeRowDates(row, row['Month'] || row.month);
@@ -5705,6 +5774,8 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           'Year': year,
           'Note': note
         };
+        const beforeGv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+        const beforeCount = beforeGv ? beforeGv.rows.length : -1;
         await updateRowAt('Payments', PAYMENT_HEADERS, r._row, updated, id);
         invalidateSheetCache('Payments');
         if (Array.isArray(memoryStore.payments)) {
@@ -5712,7 +5783,45 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           if (mIdx >= 0) memoryStore.payments[mIdx] = { ...memoryStore.payments[mIdx], ...updated };
         }
         saveStoreToDisk();
-        return { success: true, record: updated };
+        // Verify the update actually landed in the sheet (old connector
+        // generations append a duplicate instead of updating, while still
+        // returning success). If it did not land, rewrite the tab.
+        const oldTarget = { Date: r['Date'], 'Payment Method': r['Payment Method'], 'Paid (৳)': r['Paid (৳)'], Month: r['Month'], Year: r['Year'], Note: r['Note'] || '' };
+        const newTarget = { Date: updated['Date'], 'Payment Method': updated['Payment Method'], 'Paid (৳)': updated['Paid (৳)'], Month: updated['Month'], Year: updated['Year'], Note: updated['Note'] || '' };
+        const differsInCore = ['Date', 'Payment Method', 'Paid (৳)', 'Month', 'Year'].some(k => String((oldTarget as any)[k] ?? '') !== String((newTarget as any)[k] ?? ''));
+        const verifyUpdate = async () => {
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          if (!gv) return false;
+          if (beforeCount >= 0 && gv.rows.length !== beforeCount) return false;
+          const hasNew = gv.rows.some(row => paymentContentRowMatches(row, gv.headers, newTarget));
+          if (!hasNew) return false;
+          if (differsInCore && gv.rows.some(row => paymentContentRowMatches(row, gv.headers, oldTarget))) return false;
+          return true;
+        };
+        if (await verifyUpdate()) return { success: true, record: updated };
+        const fixed = await runPaymentRewrite(async () => {
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          if (!gv) return false;
+          let idx = -1;
+          if (typeof r._row === 'number' && r._row > 1 && gv.rows[r._row - 2] && paymentContentRowMatches(gv.rows[r._row - 2], gv.headers, oldTarget)) idx = r._row - 2;
+          if (idx === -1) idx = gv.rows.findIndex(row => paymentContentRowMatches(row, gv.headers, oldTarget));
+          if (idx === -1) return false;
+          const newRow = [updated['Date'], updated['Payment Method'], String(updated['Paid (৳)']), updated['Month'], updated['Year'], updated['Note'] || ''];
+          let newRows = gv.rows.slice();
+          newRows[idx] = newRow;
+          // The failed update may ALSO have appended a duplicate copy of the
+          // new row (old connector behaviour). Drop any other copy so the
+          // tab ends with exactly one row carrying the new content.
+          newRows = newRows.filter((row, i) => {
+            if (i === idx) return true;
+            if (String(newTarget.Note || '').trim()) return !paymentContentRowMatches(row, gv.headers, newTarget);
+            return !row.every((cell, c) => String(cell ?? '').trim() === String(newRow[c] ?? '').trim());
+          });
+          if (!(await rewritePaymentsTab(gv.headers, newRows))) return false;
+          return verifyUpdate();
+        });
+        if (fixed) return { success: true, record: updated, viaRewrite: true };
+        return { success: false, message: 'Payment update did not reach the sheet. Please paste the latest sync connector and retry.' };
       }
       return { success: false, message: 'Payment record not found' };
     }
@@ -5792,6 +5901,21 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       saveStoreToDisk();
       const afterCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, 'Payments')) : -1;
       if (beforeCount > 0 && afterCount >= 0 && afterCount !== beforeCount - 1) {
+        // Fallback: the deployed connector may not support content
+        // matching (old generation) — rewrite the tab without exactly one
+        // content-matching row, then re-verify the count.
+        const fixed = await runPaymentRewrite(async () => {
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          if (!gv) return false;
+          const idx = gv.rows.findIndex(row => paymentContentRowMatches(row, gv.headers, matchInfo));
+          if (idx === -1) return false;
+          const newRows = gv.rows.slice();
+          newRows.splice(idx, 1);
+          if (!(await rewritePaymentsTab(gv.headers, newRows))) return false;
+          const v = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          return !!v && countGvizMatches(v) === beforeCount - 1;
+        });
+        if (fixed) return { success: true, viaRewrite: true };
         return { success: false, message: 'Payment delete did not reach the sheet (row still present). Please paste the latest sync connector and retry.' };
       }
       return { success: true };
