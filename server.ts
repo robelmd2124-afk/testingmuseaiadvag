@@ -3476,16 +3476,14 @@ async function withCampaignLock<T>(fn: () => Promise<T>): Promise<T> {
 const TOMBSTONE_TTL_MS = 15 * 60 * 1000;
 
 function tombstoneKeysFor(recordId?: string, row?: any): string[] {
+  // Record-ID ONLY. An SL+page key used to live here too, but it blocked
+  // every row sharing that SL+page+month+year for 15 minutes — including a
+  // surviving duplicate-SL twin and a legitimately re-added entry. Since
+  // adds now preserve a stable Record ID per entry (single server writer),
+  // the ID key alone is what stops a deleted row from resurrecting.
   const keys: string[] = [];
   const id = String(recordId || row?.['Record ID'] || '').trim();
   if (id) keys.push('id:' + id);
-  const sl = String(row?.SL || row?.['SL NO'] || row?.sl_no || '').trim();
-  const page = String(row?.['Page Name'] || row?.page_name || '').trim().toLowerCase();
-  if (sl && page) {
-    const m = String(row?.Month || row?.month || '').trim().toLowerCase();
-    const y = String(row?.Year || row?.year || '').trim();
-    keys.push(`sl:${sl}|${page}|${m}|${y}`);
-  }
   return keys;
 }
 
@@ -5469,9 +5467,16 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       let foundRecord: any = clientRow || null;
       let targetSheetName = sName;
 
+      // Row lookup is by Record ID ONLY when one is known. An SL fallback
+      // could pick a duplicate-SL twin (a different real entry) and delete
+      // that instead — so the SL fallback applies only to legacy deletes
+      // with no Record ID at all.
+      const byId = (x: any) => cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId);
+      const bySlFallback = (x: any) => !cleanId && foundRecord?.SL && String(x.SL || '').trim() === String(foundRecord.SL).trim();
+
       // 1. Check in primary month sheet
       const rows = await readRows(sName, CH);
-      const matchedPrimary = rows.find(x => (cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId)) || (foundRecord?.SL && String(x.SL || '').trim() === String(foundRecord.SL).trim()));
+      const matchedPrimary = rows.find(x => byId(x) || bySlFallback(x));
       if (matchedPrimary) {
         foundRecord = { ...matchedPrimary, ...foundRecord };
       }
@@ -5479,7 +5484,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       // 2. If not found in primary month, search all memory campaign sheets
       if (!matchedPrimary) {
         for (const [mKey, mRows] of Object.entries(memoryStore.campaigns)) {
-          const match = mRows.find(x => (cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId)) || (foundRecord?.SL && String(x.SL || '').trim() === String(foundRecord.SL).trim()));
+          const match = mRows.find(x => byId(x) || bySlFallback(x));
           if (match) {
             foundRecord = { ...match, ...foundRecord };
             targetSheetName = mKey;
@@ -5490,7 +5495,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
 
       // 3. If still not found, check Today_Created
       if (memoryStore.todayCreated) {
-        const matchTc = memoryStore.todayCreated.find(x => (cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId)) || (foundRecord?.SL && String(x.SL || '').trim() === String(foundRecord.SL).trim()));
+        const matchTc = memoryStore.todayCreated.find(x => byId(x) || bySlFallback(x));
         if (matchTc && !foundRecord) {
           foundRecord = matchTc;
           targetSheetName = 'Today_Created';
@@ -5518,13 +5523,15 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }
 
       // 2. Always also delete from Today_Created sheet (both Google Sheets API & Webhook & Memory)
-      const tc = memoryStore.todayCreated.find(x => (cleanId && String(x['Record ID'] || '').trim() === cleanId) || (foundRecord?.SL && String(x.SL || '').trim() === String(foundRecord.SL).trim()));
+      const tc = memoryStore.todayCreated.find(x => byId(x) || bySlFallback(x));
       await deleteRowAt('Today_Created', tc?._row, cleanId, matchInfo);
 
-      // 3. Explicit safe filter across memoryStore.todayCreated and ALL campaign sheets in memory
+      // 3. Explicit safe filter across memoryStore.todayCreated and ALL campaign sheets in memory.
+      // Record-ID-only when an ID is known: an SL-based filter would also
+      // drop a duplicate-SL twin from the app even though it still exists.
       memoryStore.todayCreated = memoryStore.todayCreated.filter(x => {
         if (cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId)) return false;
-        if (foundRecord && foundRecord.SL) {
+        if (!cleanId && foundRecord && foundRecord.SL) {
           const xNum = parseInt(String(x.SL || '').replace(/\D/g, ''), 10);
           const fNum = parseInt(String(foundRecord.SL || '').replace(/\D/g, ''), 10);
           if (String(x.SL || '').trim() === String(foundRecord.SL || '').trim() || (!isNaN(xNum) && !isNaN(fNum) && xNum === fNum)) {
@@ -5537,7 +5544,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       Object.keys(memoryStore.campaigns).forEach(mKey => {
         memoryStore.campaigns[mKey] = memoryStore.campaigns[mKey].filter(x => {
           if (cleanId && (String(x['Record ID'] || '').trim() === cleanId || String(x._recordId || '').trim() === cleanId)) return false;
-          if (foundRecord && foundRecord.SL) {
+          if (!cleanId && foundRecord && foundRecord.SL) {
             const xNum = parseInt(String(x.SL || '').replace(/\D/g, ''), 10);
             const fNum = parseInt(String(foundRecord.SL || '').replace(/\D/g, ''), 10);
             if (String(x.SL || '').trim() === String(foundRecord.SL || '').trim() || (!isNaN(xNum) && !isNaN(fNum) && xNum === fNum)) {
@@ -5553,12 +5560,15 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       // Verify the delete really landed on the Google Sheet; retry once if the
       // row is still there, otherwise warn honestly + queue an automatic retry.
       // (The tombstone above keeps the record out of the app in the meantime.)
+      // Verification is by exact Record ID ONLY: passing the row would let
+      // the SL+Page fallback count a duplicate-SL twin as "still there" and
+      // fire a retry that deletes the twin.
       try {
         if (targetSheetName && targetSheetName !== 'Today_Created' && SHEET_ID) {
-          let stillThere = await sheetStillHasRecord(targetSheetName, cleanId, foundRecord || clientRow);
+          let stillThere = await sheetStillHasRecord(targetSheetName, cleanId);
           if (stillThere) {
             await syncWebhookDirect('deleteRow', { sheetName: targetSheetName, recordId: cleanId, matchInfo });
-            stillThere = await sheetStillHasRecord(targetSheetName, cleanId, foundRecord || clientRow);
+            stillThere = await sheetStillHasRecord(targetSheetName, cleanId);
             if (stillThere) {
               currentRequestSheetSyncFailure = `Google Sheet delete could not be confirmed for "${targetSheetName}" — the record is removed in the app and the sheet delete is queued for automatic retry.`;
               enqueueServerSyncTask({ action: 'delete', name: targetSheetName, recordId: cleanId, matchInfo });
