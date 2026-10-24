@@ -5116,6 +5116,11 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           }
         }
 
+        // SL numbers already used per month tab, so a new SL can never repeat
+        // one that was already entered (covers sheet rows + rows assigned
+        // earlier in this same batch).
+        const usedSlBySheet = new Map<string, Set<number>>();
+
         for (let idx = 0; idx < list.length; idx++) {
           const item = list[idx];
           const rawStart = item.start_date || item.Start || item['Start Date'] || d?.start_date || d?.Start || '';
@@ -5123,41 +5128,80 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           // Start date is the single source of truth for the campaign's month and year
           const month = parsedStart ? MONTHS[parsedStart.getMonth()] : (item.month || item.Month || d?.month || baseMonth);
           const year = parsedStart ? String(parsedStart.getFullYear()) : (item.year || item.Year || d?.year || baseYear);
-          
-          const targetMonthNum = MONTHS.findIndex(m => m.toLowerCase() === month.toLowerCase()) + 1;
-          const targetPrefix = String(targetMonthNum).padStart(2, '0');
-          const itemSpecificSl = item.sl_no ? parseInt(String(item.sl_no).replace(/\D/g, ''), 10) : 0;
-          let sl = (itemSpecificSl && !isNaN(itemSpecificSl)) ? itemSpecificSl : (calculatedBaseSl + idx);
-          const slStr = String(sl);
-          if (!slStr.startsWith(targetPrefix) && !slStr.startsWith(String(targetMonthNum))) {
-            const properMonthSl = await nextSL(month, year);
-            sl = (parseInt(String(properMonthSl), 10) || 1001) + idx;
+
+          // Idempotency key: the client's own Record ID for this entry.
+          // A double-submit, a slow-response retry, or an offline-queue replay
+          // carries the SAME key, so the second attempt returns the row that
+          // already exists instead of creating a second entry with the same SL.
+          // (Batch items carry their own record_id; a batch item must never
+          // inherit the main payload's Record ID, or the whole batch would
+          // collapse into one row.)
+          const isSinglePayload = list.length === 1 && item === d;
+          const clientRecordId = String(
+            isSinglePayload
+              ? (item['Record ID'] || item.record_id || '')
+              : (item.record_id || item['Record ID'] || '')
+          ).trim();
+
+          const targetSheetEarly = campaignSheetName(month, year);
+          const existingRow = clientRecordId
+            ? (memoryStore.campaigns[targetSheetEarly] || []).find((r: any) => String(r['Record ID'] || r._recordId || '') === clientRecordId)
+            : undefined;
+
+          let row: any;
+          if (existingRow) {
+            // Already added by an earlier attempt of this exact entry: reuse it.
+            row = existingRow;
+          } else {
+            const targetMonthNum = MONTHS.findIndex(m => m.toLowerCase() === month.toLowerCase()) + 1;
+            const targetPrefix = String(targetMonthNum).padStart(2, '0');
+            const itemSpecificSl = item.sl_no ? parseInt(String(item.sl_no).replace(/\D/g, ''), 10) : 0;
+            let sl = (itemSpecificSl && !isNaN(itemSpecificSl)) ? itemSpecificSl : (calculatedBaseSl + idx);
+            const slStr = String(sl);
+            if (!slStr.startsWith(targetPrefix) && !slStr.startsWith(String(targetMonthNum))) {
+              const properMonthSl = await nextSL(month, year);
+              sl = (parseInt(String(properMonthSl), 10) || 1001) + idx;
+            }
+            // Never reuse an SL that is already taken in this month — bump
+            // serial-wise past every used number, including this batch's own
+            // earlier items (so a batch whose rows all carry the same sl_no
+            // still lands on consecutive, unique SLs).
+            let usedSl = usedSlBySheet.get(targetSheetEarly);
+            if (!usedSl) {
+              usedSl = new Set((memoryStore.campaigns[targetSheetEarly] || []).map((r: any) => parseInt(String(r['SL'] ?? '').replace(/\D/g, ''), 10)).filter((n: number) => n > 0));
+              usedSlBySheet.set(targetSheetEarly, usedSl);
+            }
+            while (usedSl.has(sl)) sl++;
+            usedSl.add(sl);
+
+            row = normalizeCampaign({ ...d, ...item, 'Record ID': clientRecordId || undefined, _recordId: clientRecordId || undefined }, month, year, sl);
+
+            // 1. Add to Month-wise Campaign Sheet (determined by Start Date)
+            await appendRow(campaignSheetName(row['Month'] || month, row['Year'] || year), CH, row, true);
+
+            // 2. Ensure Page in Page List — only when genuinely new. Repeat pages
+            // used to cost a second full Apps Script round-trip on every add
+            // (and kept appending duplicate rows to the Page List tab).
+            const pageNameTrimmed = String(row['Page Name'] || '').trim();
+            if (pageNameTrimmed && !memoryStore.pages.some(p => String(p).trim().toLowerCase() === pageNameTrimmed.toLowerCase())) {
+              await appendRow('Page List', ['Page Name'], { 'Page Name': pageNameTrimmed }, true);
+            }
+
+            const targetSheet = campaignSheetName(row['Month'] || month, row['Year'] || year);
+            if (!memoryStore.campaigns[targetSheet]) memoryStore.campaigns[targetSheet] = [];
+            memoryStore.campaigns[targetSheet].unshift(row);
+            saveStoreToDisk();
           }
 
-          const row = normalizeCampaign({ ...d, ...item, 'Record ID': undefined, _recordId: undefined }, month, year, sl);
-
-          // 1. Add to Month-wise Campaign Sheet (determined by Start Date)
-          await appendRow(campaignSheetName(row['Month'] || month, row['Year'] || year), CH, row, true);
-
-          // 2. Ensure Page in Page List — only when genuinely new. Repeat pages
-          // used to cost a second full Apps Script round-trip on every add
-          // (and kept appending duplicate rows to the Page List tab).
-          const pageNameTrimmed = String(row['Page Name'] || '').trim();
-          if (pageNameTrimmed && !memoryStore.pages.some(p => String(p).trim().toLowerCase() === pageNameTrimmed.toLowerCase())) {
-            await appendRow('Page List', ['Page Name'], { 'Page Name': pageNameTrimmed }, true);
-          }
-
-          const targetSheet = campaignSheetName(row['Month'] || month, row['Year'] || year);
-          if (!memoryStore.campaigns[targetSheet]) memoryStore.campaigns[targetSheet] = [];
-          memoryStore.campaigns[targetSheet].unshift(row);
           if (!memoryStore.todayCreated) memoryStore.todayCreated = [];
-          memoryStore.todayCreated.unshift({
-            ...row,
-            'Record ID': row['Record ID'],
-            'Month': row['Month'] || month,
-            'Year': row['Year'] || year
-          });
-          saveStoreToDisk();
+          if (!memoryStore.todayCreated.some((r: any) => String(r['Record ID'] || r._recordId || '') === String(row['Record ID'] || row._recordId || ''))) {
+            memoryStore.todayCreated.unshift({
+              ...row,
+              'Record ID': row['Record ID'],
+              'Month': row['Month'] || month,
+              'Year': row['Year'] || year
+            });
+          }
 
           last = row;
           const formattedText = formatCampaignText(row);

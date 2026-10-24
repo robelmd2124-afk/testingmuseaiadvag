@@ -6508,6 +6508,15 @@ async function copyMultipleRecordsSequentially(items) {
     }
   }
 
+  // Final write: ALL campaign names, one per line, as the current clipboard
+  // item — so a plain Ctrl+V pastes every name separately (one per line),
+  // while the individual entries above stay available in Win+V history.
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(list.join('\n'));
+    }
+  } catch (_) { /* individual history entries are already written */ }
+
   showToast(`📋 ${list.length} campaigns copied to clipboard individually (Win + V history ready)!`, 'success');
 }
 
@@ -7985,6 +7994,16 @@ async function processClientOfflineQueue() {
       try {
         let res;
         if (item.type === 'campaign') {
+          // Attach the original optimistic Record IDs so a replayed add is
+          // recognised by the server instead of creating duplicate entries
+          // with the same SLs.
+          const opts = item.optimisticItems || [];
+          if (opts.length) {
+            if (!item.data['Record ID'] && opts[0]['Record ID']) item.data['Record ID'] = opts[0]['Record ID'];
+            (item.batchItems || []).forEach((b, i) => {
+              if (!b.record_id && opts[i] && opts[i]['Record ID']) b.record_id = opts[i]['Record ID'];
+            });
+          }
           if (item.batchItems && item.batchItems.length) {
             res = await cloudRpc('addCampaignBatch', [item.data, item.batchItems]);
           } else {
@@ -8194,14 +8213,20 @@ async function saveEntry() {
     const batchItems = [];
     if (extraRows.length) {
       const mainSl = data.sl_no ? String(data.sl_no).replace(/\D/g, '') : '';
+      // Each entry gets its own idempotency key (Record ID). The server
+      // reuses it as the row's Record ID and refuses a second add carrying
+      // the same key — so a double-submit, slow-response retry, or
+      // offline-queue replay can never create a duplicate entry.
+      const batchStamp = Date.now();
       batchItems.push({
         day: Number(data.day) || 2,
         budget: Number(data.budget) || 10,
         start_date: data.start_date,
         types: data.types || 'Boost',
-        sl_no: mainSl || undefined
+        sl_no: mainSl || undefined,
+        record_id: 'temp_' + batchStamp + '_0'
       });
-      for (const row of extraRows) {
+      extraRows.forEach((row, rowIdx) => {
         const day = Number(row.querySelector('.multi-campaign-day')?.value) || 2;
         const budget = Number(row.querySelector('.multi-campaign-budget')?.value) || 10;
         const rowType = row.querySelector('.multi-campaign-type')?.value || data.types || 'Boost';
@@ -8211,14 +8236,20 @@ async function saveEntry() {
           budget,
           start_date: data.start_date,
           types: rowType,
-          sl_no: rowSl || undefined
+          sl_no: rowSl || undefined,
+          record_id: 'temp_' + batchStamp + '_' + (rowIdx + 1)
         });
-      }
+      });
     }
 
     // =========================================================================
     // ⚡ INSTANT OPTIMISTIC UI EXECUTION (0ms latency, zero delay!)
     // =========================================================================
+    // Single-entry idempotency key: one stable Record ID shared by the
+    // optimistic row, the server add, and any offline-queue replay, so a
+    // retry can never create a second entry with the same SL.
+    if (isCampaignMenu && !batchItems.length && !data['Record ID']) data['Record ID'] = 'temp_' + Date.now();
+
     if (isCampaignMenu) {
       const rateVal = parseFloat(data.rate) || state.rate || 140;
       const startVal = data.start_date || todayStr;
@@ -8254,8 +8285,8 @@ async function saveEntry() {
             'Entry Date': getTodayFormatted(),
             'Month': itemMonth,
             'Year': itemYear,
-            'Record ID': 'temp_' + Date.now() + '_' + bIdx,
-            _recordId: 'temp_' + Date.now() + '_' + bIdx,
+            'Record ID': bItem.record_id || ('temp_' + Date.now() + '_' + bIdx),
+            _recordId: bItem.record_id || ('temp_' + Date.now() + '_' + bIdx),
             _optimistic: true
           });
         });
@@ -8286,8 +8317,8 @@ async function saveEntry() {
           'Entry Date': getTodayFormatted(),
           'Month': itemMonth,
           'Year': itemYear,
-          'Record ID': 'temp_' + Date.now(),
-          _recordId: 'temp_' + Date.now(),
+          'Record ID': data['Record ID'] || ('temp_' + Date.now()),
+          _recordId: data['Record ID'] || ('temp_' + Date.now()),
           _optimistic: true
         });
       }
@@ -8363,19 +8394,17 @@ async function saveEntry() {
         }, 800);
       }
 
-      showToast('⚡ Campaign saved & synced to Google Sheet instantly! 📋', 'success');
+      showToast('⚡ Campaign saved! Google Sheet-e sync hocche 📋', 'success');
 
       // 5. Asynchronous background server & Google Sheet persistence with Vault Backup
+      // NOTE: the server RPC below is the ONLY sheet writer for campaigns.
+      // The old parallel direct browser-to-sheet write was removed: it wrote
+      // the same entries a second time (with the same SLs), which is exactly
+      // how one entry became two identical rows in the sheet.
       saveEntryToVault(optimisticItems, 'saved');
 
       (async () => {
         try {
-          // Instant Sheet Sync directly to the month campaign tab in parallel with server RPC
-          const targetMonth = optimisticItems[0]?.Month || data.month || 'October';
-          const targetYear = optimisticItems[0]?.Year || data.year || String(new Date().getFullYear());
-          const targetMonthTab = `Campaign_${targetMonth}_${targetYear}`;
-          autoSyncDirectToGoogleSheets(targetMonthTab, CH, optimisticItems).catch(() => {});
-
           data.pin = localStorage.getItem('adverse_saved_pin') || '01726912624';
 
           let res;
@@ -8402,6 +8431,18 @@ async function saveEntry() {
               replaceList(state.filteredRecords);
               replaceList(state.masterCampaignRegistry);
               replaceList(state.todayCreatedRegistry);
+              // Re-copy with the server-confirmed SLs when they differ from
+              // the optimistic ones, so pasted campaign names always carry
+              // the true SL numbers (the optimistic SL is only a guess when
+              // the server had to bump a taken number).
+              const slChanged = confirmedRecords.some((conf, i) => {
+                const opt = optimisticItems[i];
+                return opt && String(conf['SL'] ?? '') !== String(opt['SL'] ?? '');
+              });
+              if (slChanged) {
+                if (confirmedRecords.length > 1) copyMultipleRecordsSequentially(confirmedRecords);
+                else if (confirmedRecords[0]) copyCampaignRecord(confirmedRecords[0]);
+              }
             }
             state.clientCache = {};
             saveLocalAppSnapshot();
