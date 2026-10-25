@@ -3350,6 +3350,29 @@ function selectMenu(key) {
   if (filterInput) filterInput.value = '';
   state.searchQuery = '';
 
+  // Payments always opens on the running month (never All): only the
+  // current month's data shows on entering Payments. An explicit month
+  // choice (dropdown/pills/All button) still works during the visit;
+  // re-entering Payments resets to the running month.
+  if (isPayment) {
+    const runMonth = MONTHS[new Date().getMonth()];
+    const runYear = String(new Date().getFullYear());
+    state.filters.month = runMonth;
+    state.filters.year = runYear;
+    const fm = document.getElementById('filterMonth');
+    if (fm) fm.value = runMonth;
+    const fy = document.getElementById('filterYear');
+    if (fy) fy.value = runYear;
+    const pills = document.getElementById('monthQuickPills');
+    if (pills) {
+      pills.querySelectorAll('button').forEach(btn => {
+        const selected = btn.textContent.trim().toLowerCase().startsWith(runMonth.toLowerCase());
+        btn.className = `btn btn-secondary ${selected ? 'active' : ''}`;
+        btn.style.background = selected ? 'var(--pri)' : '';
+      });
+    }
+  }
+
   if (isAgencySpending) {
     populateAgencyCalcFilters();
   }
@@ -9165,8 +9188,11 @@ function deletePaymentItem(recordId, paymentRow) {
     year: row?.Year
   };
 
+  // Month-wise payments: direct deletes must hit the row's month tab.
+  const payTab = (row?.Month && row?.Year) ? `Payments_${row.Month}_${row.Year}` : 'Payments';
+
   if (oauthToken && sheetId) {
-    deleteRowFromSheetDirect(sheetId, 'Payments', recordId, undefined, extraMatch).catch(() => {});
+    deleteRowFromSheetDirect(sheetId, payTab, recordId, undefined, extraMatch).catch(() => {});
   }
   if (webhookUrl) {
     fetch(webhookUrl, {
@@ -9175,7 +9201,7 @@ function deletePaymentItem(recordId, paymentRow) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'deleteRow',
-        sheetName: 'Payments',
+        sheetName: payTab,
         recordId,
         matchInfo: { 'Record ID': recordId, ...extraMatch }
       })
@@ -9283,7 +9309,7 @@ async function deleteRecordItem(id, row) {
       } else if (key === 'agency_cost') {
         deleteRowFromSheetDirect(sheetId, 'Agency_Cost', id, sl, extraMatch).catch(() => {});
       } else if (key === 'payment_due_tracker' || key === 'payments') {
-        deleteRowFromSheetDirect(sheetId, 'Payments', id, sl, extraMatch).catch(() => {});
+        deleteRowFromSheetDirect(sheetId, `Payments_${resolvedMonth}_${resolvedYear}`, id, sl, extraMatch).catch(() => {});
       } else {
         // Delete from all potential campaign tabs where this record could reside
         Promise.allSettled([
@@ -9305,7 +9331,7 @@ async function deleteRecordItem(id, row) {
     if (key === 'new_pages') targetWebhookTabs.push('Pause_ADS');
     else if (key === 'scam') targetWebhookTabs.push('Scam');
     else if (key === 'agency_cost') targetWebhookTabs.push('Agency_Cost');
-    else if (key === 'payment_due_tracker' || key === 'payments') targetWebhookTabs.push('Payments');
+    else if (key === 'payment_due_tracker' || key === 'payments') targetWebhookTabs.push(`Payments_${resolvedMonth}_${resolvedYear}`);
     else {
       targetWebhookTabs.push(`Campaign_${resolvedMonth}_${resolvedYear}`);
       targetWebhookTabs.push('Today_Created');

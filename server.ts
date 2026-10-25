@@ -1689,6 +1689,14 @@ function campaignSheetName(month: string, year: string | number): string {
   return `Campaign_${month}_${year}`;
 }
 
+// Month-wise payments: each month lives in its own tab
+// (Payments_<Month>_<Year>), mirroring the campaign tabs. The legacy
+// single 'Payments' tab is kept read-only during the transition and is
+// cleared only after the month-tab build is imported and verified.
+function paymentSheetName(month: string, year: string | number): string {
+  return `Payments_${month}_${year}`;
+}
+
 async function ensureBaseSheets() {
   if (sheetsApiDisabled) return;
   const all: [string, string[]][] = [
@@ -2361,14 +2369,14 @@ function paymentContentRowMatches(row: string[], headers: string[], t: any): boo
   }
   return true;
 }
-async function rewritePaymentsTab(headers: string[], rows: string[][]): Promise<boolean> {
+async function rewritePaymentsTab(tab: string, headers: string[], rows: string[][]): Promise<boolean> {
   const targetUrl = memoryStore.settings.webhook_url;
   if (!targetUrl) return false;
   try {
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pushAllData', allSheetsData: { Payments: [headers, ...rows] } }),
+      body: JSON.stringify({ action: 'pushAllData', allSheetsData: { [tab]: [headers, ...rows] } }),
       redirect: 'follow',
       signal: AbortSignal.timeout(30000)
     });
@@ -5783,8 +5791,18 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         _recordId: recId,
         _createdAt: Date.now()
       };
-      await appendRow('Payments', PAYMENT_HEADERS, newPayRow, true);
+      // Month-wise payments: each month lives in its own tab
+      // (Payments_<Month>_<Year>). The connector creates the tab on first
+      // append, so a brand-new month needs no pre-creation.
+      const targetTab = paymentSheetName(month, year);
+      await appendRow(targetTab, PAYMENT_HEADERS, newPayRow, true);
+      // appendRow only maintains memory for the legacy 'Payments' name, so
+      // mirror the new row into the merged payment store ourselves.
+      if (!memoryStore.payments.some(p => String(p['Record ID'] || '').trim() === recId || String(p._recordId || '').trim() === recId)) {
+        memoryStore.payments.push({ ...newPayRow, _row: memoryStore.payments.length + 2 });
+      }
       invalidateSheetCache('Payments');
+      invalidateSheetCache(targetTab);
       saveStoreToDisk();
 
       return { success: true, record: newPayRow };
@@ -5795,12 +5813,23 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       const payload = decodePaymentId(id);
       const rowNo = payload?.row || (Number(id) ? Number(id) : null);
       const cleanId = String(id || '').trim();
-      const isMatch = (x: any) =>
-        (rowNo && x._row === rowNo) ||
-        (cleanId && (String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId));
-
+      // Month-tab aware matching: _row values repeat across month tabs, so
+      // a bare _row match is ambiguous. Prefer an exact Record ID match;
+      // for _row matches, narrow to a single candidate using the edit's
+      // declared month/year (same-month edits, the common case). Anything
+      // still ambiguous fails honestly instead of touching the wrong tab.
       const rows = await readRows('Payments', PAYMENT_HEADERS);
-      const r = rows.find(isMatch) || (Array.isArray(memoryStore.payments) ? memoryStore.payments.find(isMatch) : null);
+      let candidates = cleanId ? rows.filter(x => String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId) : [];
+      if (candidates.length === 0 && rowNo) candidates = rows.filter(x => x._row === rowNo);
+      if (candidates.length > 1) {
+        const dm = (d.Month && d.Month !== 'Month') ? String(d.Month).trim() : ((d.month && d.month !== 'Month') ? String(d.month).trim() : '');
+        const dy = (d.Year && d.Year !== 'Year') ? String(d.Year).trim() : ((d.year && d.year !== 'Year') ? String(d.year).trim() : '');
+        const narrowed = candidates.filter(x => (!dm || String(x.Month || '').trim().toLowerCase() === dm.toLowerCase()) && (!dy || String(x.Year || '').trim() === dy));
+        if (narrowed.length === 1) candidates = narrowed;
+      }
+      if (candidates.length > 1) return { success: false, message: 'Payment record is ambiguous (same row number in multiple months). Please refresh and retry.' };
+      const r = candidates.length === 1 ? candidates[0] : null;
+      const isMatch = (x: any) => x === r;
       if (r) {
         const rawDate = d.Date || d.date || d.payment_date || r['Date'];
         const parsedDate = parseAnyDate(rawDate);
@@ -5822,10 +5851,62 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           'Year': year,
           'Note': note
         };
-        const beforeGv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+        // Month-tab routing: the row lives in its ORIGINAL month's tab.
+        const oldTarget = { Date: r['Date'], 'Payment Method': r['Payment Method'], 'Paid (৳)': r['Paid (৳)'], Month: r['Month'], Year: r['Year'], Note: r['Note'] || '' };
+        const newTarget = { Date: updated['Date'], 'Payment Method': updated['Payment Method'], 'Paid (৳)': updated['Paid (৳)'], Month: updated['Month'], Year: updated['Year'], Note: updated['Note'] || '' };
+        const differsInCore = ['Date', 'Payment Method', 'Paid (৳)', 'Month', 'Year'].some(k => String((oldTarget as any)[k] ?? '') !== String((newTarget as any)[k] ?? ''));
+        const origTab = (String(r['Month'] || '').trim() && String(r['Year'] || '').trim()) ? paymentSheetName(String(r['Month']).trim(), String(r['Year']).trim()) : '';
+        const newTab = paymentSheetName(updated['Month'], updated['Year']);
+        if (!origTab) return { success: false, message: 'Payment record month is unknown — cannot route to a month tab.' };
+        // Cross-month move: rewrite both tabs (remove from old, append to new).
+        if (newTab !== origTab) {
+          const moved = await runPaymentRewrite(async () => {
+            const gvOld = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, origTab) : null;
+            const gvNew = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, newTab) : null;
+            if (!gvOld || !gvNew) return false;
+            const idx = gvOld.rows.findIndex(row => paymentContentRowMatches(row, gvOld.headers, oldTarget));
+            if (idx === -1) return false;
+            const oldRows = gvOld.rows.slice(); oldRows.splice(idx, 1);
+            const newRowArr = [updated['Date'], updated['Payment Method'], String(updated['Paid (৳)']), updated['Month'], updated['Year'], updated['Note'] || ''];
+            const newRows = [...gvNew.rows, newRowArr];
+            if (!(await rewritePaymentsTab(origTab, gvOld.headers, oldRows))) return false;
+            if (!(await rewritePaymentsTab(newTab, gvNew.headers, newRows))) return false;
+            const vOld = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, origTab) : null;
+            const vNew = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, newTab) : null;
+            if (!vOld || !vNew) return false;
+            const goneFromOld = !vOld.rows.some(row => paymentContentRowMatches(row, vOld.headers, oldTarget));
+            const presentInNew = vNew.rows.some(row => paymentContentRowMatches(row, vNew.headers, newTarget));
+            return goneFromOld && presentInNew;
+          });
+          if (Array.isArray(memoryStore.payments)) {
+            const mIdx = memoryStore.payments.findIndex(isMatch);
+            if (mIdx >= 0) memoryStore.payments[mIdx] = { ...memoryStore.payments[mIdx], ...updated };
+          }
+          invalidateSheetCache('Payments'); invalidateSheetCache(origTab); invalidateSheetCache(newTab);
+          saveStoreToDisk();
+          if (moved) return { success: true, record: updated, moved: true };
+          return { success: false, message: 'Payment move did not reach the sheet. Please retry.' };
+        }
+        const beforeGv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, origTab) : null;
         const beforeCount = beforeGv ? beforeGv.rows.length : -1;
-        await updateRowAt('Payments', PAYMENT_HEADERS, r._row, updated, id);
+        // Month-tab aware sheet write: updateRowAt's memory/old-row capture
+        // only handles the legacy 'Payments' name, so send the webhook
+        // update directly with the OLD row content as matchInfo (the
+        // connector must find the row as it currently exists in the tab).
+        try {
+          await syncWebhookDirect('updateRow', {
+            sheetName: origTab,
+            rowNo: r._row,
+            recordId: id,
+            matchInfo: { Date: r['Date'], 'Payment Method': r['Payment Method'], 'Paid (৳)': r['Paid (৳)'], Month: r['Month'], Year: r['Year'], Note: r['Note'] || '' },
+            headers: PAYMENT_HEADERS,
+            rowValues: formatRowValuesForSheet(PAYMENT_HEADERS, updated, updated['Month'])
+          });
+        } catch (e: any) {
+          console.warn('[Payment Update Sheet Sync Note]:', e?.message);
+        }
         invalidateSheetCache('Payments');
+        invalidateSheetCache(origTab);
         if (Array.isArray(memoryStore.payments)) {
           const mIdx = memoryStore.payments.findIndex(isMatch);
           if (mIdx >= 0) memoryStore.payments[mIdx] = { ...memoryStore.payments[mIdx], ...updated };
@@ -5834,11 +5915,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         // Verify the update actually landed in the sheet (old connector
         // generations append a duplicate instead of updating, while still
         // returning success). If it did not land, rewrite the tab.
-        const oldTarget = { Date: r['Date'], 'Payment Method': r['Payment Method'], 'Paid (৳)': r['Paid (৳)'], Month: r['Month'], Year: r['Year'], Note: r['Note'] || '' };
-        const newTarget = { Date: updated['Date'], 'Payment Method': updated['Payment Method'], 'Paid (৳)': updated['Paid (৳)'], Month: updated['Month'], Year: updated['Year'], Note: updated['Note'] || '' };
-        const differsInCore = ['Date', 'Payment Method', 'Paid (৳)', 'Month', 'Year'].some(k => String((oldTarget as any)[k] ?? '') !== String((newTarget as any)[k] ?? ''));
+        // (oldTarget/newTarget/differsInCore are defined above, before the
+        // month-tab routing, so the move branch can use them too.)
         const verifyUpdate = async () => {
-          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, origTab) : null;
           if (!gv) return false;
           if (beforeCount >= 0 && gv.rows.length !== beforeCount) return false;
           const hasNew = gv.rows.some(row => paymentContentRowMatches(row, gv.headers, newTarget));
@@ -5848,7 +5928,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         };
         if (await verifyUpdate()) return { success: true, record: updated };
         const fixed = await runPaymentRewrite(async () => {
-          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, origTab) : null;
           if (!gv) return false;
           let idx = -1;
           if (typeof r._row === 'number' && r._row > 1 && gv.rows[r._row - 2] && paymentContentRowMatches(gv.rows[r._row - 2], gv.headers, oldTarget)) idx = r._row - 2;
@@ -5865,7 +5945,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
             if (String(newTarget.Note || '').trim()) return !paymentContentRowMatches(row, gv.headers, newTarget);
             return !row.every((cell, c) => String(cell ?? '').trim() === String(newRow[c] ?? '').trim());
           });
-          if (!(await rewritePaymentsTab(gv.headers, newRows))) return false;
+          if (!(await rewritePaymentsTab(origTab, gv.headers, newRows))) return false;
           return verifyUpdate();
         });
         if (fixed) return { success: true, record: updated, viaRewrite: true };
@@ -5879,24 +5959,34 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       const payload = decodePaymentId(id);
       const rowNo = payload?.row || (Number(id) ? Number(id) : null);
       const cleanId = String(id || clientRow?._recordId || clientRow?.['Record ID'] || '').trim();
-      const isMatch = (x: any) => {
-        if (!x) return false;
-        if (rowNo && x._row === rowNo) return true;
-        if (cleanId && (String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId)) return true;
-        if (clientRow) {
-          const cDate = String(clientRow.Date || clientRow.date || '').trim();
-          const xDate = String(x.Date || '').trim();
-          const cPaid = parseFloat(String(clientRow['Paid (৳)'] || clientRow.paid || clientRow.paid_amount || '0').replace(/[^0-9.]/g, ''));
-          const xPaid = parseFloat(String(x['Paid (৳)'] || x.Paid || '0').replace(/[^0-9.]/g, ''));
-          if (cDate && xDate && cDate === xDate && !isNaN(cPaid) && !isNaN(xPaid) && Math.abs(cPaid - xPaid) < 0.01) {
-            return true;
-          }
-        }
-        return false;
+      // Month-tab aware matching: _row repeats across month tabs, so a bare
+      // _row match is ambiguous. Prefer exact Record ID, then _row + content
+      // agreement, then full content (Date+Paid+Method+Month+Year). Anything
+      // still ambiguous fails honestly instead of touching the wrong tab.
+      const contentAgrees = (x: any, c: any) => {
+        if (!x || !c) return false;
+        const cDate = String(c.Date || c.date || '').trim();
+        const xDate = String(x.Date || '').trim();
+        if (!cDate || !xDate || cDate !== xDate) return false;
+        const cPaid = parseFloat(String(c['Paid (৳)'] || c.paid || c.paid_amount || '0').replace(/[^0-9.]/g, ''));
+        const xPaid = parseFloat(String(x['Paid (৳)'] || x.Paid || '0').replace(/[^0-9.]/g, ''));
+        if (isNaN(cPaid) || isNaN(xPaid) || Math.abs(cPaid - xPaid) >= 0.01) return false;
+        if (c['Payment Method'] && x['Payment Method'] && String(c['Payment Method']).trim().toLowerCase() !== String(x['Payment Method']).trim().toLowerCase()) return false;
+        if (c.Month && x.Month && String(c.Month).trim().toLowerCase() !== String(x.Month).trim().toLowerCase()) return false;
+        if (c.Year && x.Year && String(c.Year).trim() !== String(x.Year).trim()) return false;
+        return true;
       };
-
       const rows = await readRows('Payments', PAYMENT_HEADERS);
-      const r = rows.find(isMatch) || (Array.isArray(memoryStore.payments) ? memoryStore.payments.find(isMatch) : null) || clientRow;
+      let candidates = cleanId ? rows.filter(x => x && (String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId)) : [];
+      if (candidates.length === 0 && rowNo) candidates = rows.filter(x => x && x._row === rowNo && (!clientRow || contentAgrees(x, clientRow)));
+      if (candidates.length === 0 && clientRow) candidates = rows.filter(x => contentAgrees(x, clientRow));
+      if (candidates.length > 1 && clientRow && clientRow.Month && clientRow.Year) {
+        const narrowed = candidates.filter(x => String(x.Month || '').trim().toLowerCase() === String(clientRow.Month).trim().toLowerCase() && String(x.Year || '').trim() === String(clientRow.Year).trim());
+        if (narrowed.length === 1) candidates = narrowed;
+      }
+      if (candidates.length > 1) return { success: false, message: 'Payment record is ambiguous (same row number in multiple months). Please refresh and retry.' };
+      const r = candidates.length === 1 ? candidates[0] : clientRow;
+      if (!r) return { success: false, message: 'Payment record not found' };
       // Full content: the Payments tab has no Record ID column, so the
       // connector can only find the row by its content (see
       // paymentContentMatch in the sync connector).
@@ -5909,6 +5999,11 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         Year: r?.['Year'] || clientRow?.Year,
         Note: r?.['Note'] || clientRow?.Note || ''
       };
+
+      // Month-tab routing: the row lives in its own month's tab.
+      const targetTab = (String(matchInfo.Month || '').trim() && String(matchInfo.Year || '').trim())
+        ? paymentSheetName(String(matchInfo.Month).trim(), String(matchInfo.Year).trim()) : '';
+      if (!targetTab) return { success: false, message: 'Payment record month is unknown — cannot route to a month tab.' };
 
       // Count-based verification (2026-10-24 fix): payments carry no Record
       // ID in the sheet, so ID-based verification is impossible. The sheet
@@ -5939,28 +6034,36 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           return sameDate && samePaid && sameMethod && sameMonth && sameYear;
         }).length;
       };
-      const beforeCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, 'Payments')) : -1;
+      const beforeCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, targetTab)) : -1;
 
-      await deleteRowAt('Payments', r?._row, cleanId, matchInfo);
+      // Month-tab aware sheet write: deleteRowAt purges memory by bare _row
+      // (which repeats across month tabs), so send the webhook delete
+      // directly and purge memory precisely below.
+      try {
+        await syncWebhookDirect('deleteRow', { sheetName: targetTab, rowNo: r?._row, recordId: cleanId, matchInfo });
+      } catch (e: any) {
+        console.warn('[Payment Delete Sheet Sync Note]:', e?.message);
+      }
       if (Array.isArray(memoryStore.payments)) {
-        memoryStore.payments = memoryStore.payments.filter(p => !isMatch(p));
+        memoryStore.payments = memoryStore.payments.filter(p => p !== r && !contentAgrees(p, matchInfo));
       }
       invalidateSheetCache('Payments');
+      invalidateSheetCache(targetTab);
       saveStoreToDisk();
-      const afterCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, 'Payments')) : -1;
+      const afterCount = SHEET_ID ? countGvizMatches(await fetchSheetCsvGviz(SHEET_ID, targetTab)) : -1;
       if (beforeCount > 0 && afterCount >= 0 && afterCount !== beforeCount - 1) {
         // Fallback: the deployed connector may not support content
         // matching (old generation) — rewrite the tab without exactly one
         // content-matching row, then re-verify the count.
         const fixed = await runPaymentRewrite(async () => {
-          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          const gv = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, targetTab) : null;
           if (!gv) return false;
           const idx = gv.rows.findIndex(row => paymentContentRowMatches(row, gv.headers, matchInfo));
           if (idx === -1) return false;
           const newRows = gv.rows.slice();
           newRows.splice(idx, 1);
-          if (!(await rewritePaymentsTab(gv.headers, newRows))) return false;
-          const v = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, 'Payments') : null;
+          if (!(await rewritePaymentsTab(targetTab, gv.headers, newRows))) return false;
+          const v = SHEET_ID ? await fetchSheetCsvGviz(SHEET_ID, targetTab) : null;
           return !!v && countGvizMatches(v) === beforeCount - 1;
         });
         if (fixed) return { success: true, viaRewrite: true };
