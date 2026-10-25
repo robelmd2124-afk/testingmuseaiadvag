@@ -410,6 +410,7 @@ function formatAllDatesInEntireSpreadsheet(chosenFormat) {
       case 'YYYY-MM-DD': return yStr + '-' + mNum + '-' + dPad;
       case 'DD-MM-YYYY': return dPad + '-' + mNum + '-' + yStr;
       case 'D-Mon-YYYY': return dSingle + '-' + mShort + '-' + yStr;
+      case 'DD-Mon-YY': return dPad + '-' + mShort + '-' + yStr.slice(-2);
       case 'DD-Mon-YYYY':
       default: return dPad + '-' + mShort + '-' + yStr;
     }

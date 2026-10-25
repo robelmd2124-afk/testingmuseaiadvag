@@ -217,6 +217,7 @@ export function parseAnyDate(str: any, monthHint?: string | number): Date | null
 }
 
 export const SUPPORTED_DATE_FORMATS = [
+  { id: 'DD-Mon-YY', label: '25-Oct-26 (DD-Mon-YY)', example: '25-Oct-26' },
   { id: 'DD-Mon-YYYY', label: '12-Oct-2026 (DD-Mon-YYYY)', example: '12-Oct-2026' },
   { id: 'DD/MM/YYYY', label: '12/10/2026 (DD/MM/YYYY)', example: '12/10/2026' },
   { id: 'YYYY-MM-DD', label: '2026-10-12 (YYYY-MM-DD)', example: '2026-10-12' },
@@ -224,7 +225,7 @@ export const SUPPORTED_DATE_FORMATS = [
   { id: 'D-Mon-YYYY', label: '1-Oct-2026 (D-Mon-YYYY)', example: '1-Oct-2026' }
 ];
 
-let globalActiveDateFormat = 'DD-Mon-YYYY';
+let globalActiveDateFormat = 'DD-Mon-YY';
 
 export function setActiveDateFormat(fmt: string) {
   if (fmt && typeof fmt === 'string') {
@@ -238,7 +239,7 @@ export function getActiveDateFormat(): string {
 
 export function formatCustomDate(dateInput: any, monthHint?: string | number, formatOverride?: string): string {
   if (!dateInput && dateInput !== 0) return '';
-  const targetFormat = formatOverride || globalActiveDateFormat || 'DD-Mon-YYYY';
+  const targetFormat = formatOverride || globalActiveDateFormat || 'DD-Mon-YY';
 
   let d: Date | null = null;
   if (dateInput instanceof Date) {
@@ -269,6 +270,8 @@ export function formatCustomDate(dateInput: any, monthHint?: string | number, fo
       return `${dayPadded}-${monNum}-${yr}`;
     case 'D-Mon-YYYY':
       return `${daySingle}-${monShort}-${yr}`;
+    case 'DD-Mon-YY':
+      return `${dayPadded}-${monShort}-${yr.slice(-2)}`;
     case 'DD-Mon-YYYY':
     default:
       return `${dayPadded}-${monShort}-${yr}`;

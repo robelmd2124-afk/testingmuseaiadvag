@@ -570,7 +570,7 @@ let state = {
     try { return JSON.parse(localStorage.getItem('adverse_verifications') || '{}'); } catch(e) { return {}; }
   })(),
   verificationFilter: 'all',
-  dateFormat: (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YYYY',
+  dateFormat: (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YY',
   masterCampaignRegistry: Array.isArray(storedMasterCampaigns) ? storedMasterCampaigns : []
 };
 if (typeof window !== 'undefined') {
@@ -1015,7 +1015,7 @@ function getDateProximityBadge(dateVal) {
 }
 
 function getActiveDateFormat() {
-  return (state && state.dateFormat) || (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YYYY';
+  return (state && state.dateFormat) || (typeof localStorage !== 'undefined' ? localStorage.getItem('adverse_date_format') : null) || 'DD-Mon-YY';
 }
 
 function _formatDateObj(d, targetFmt) {
@@ -1036,6 +1036,8 @@ function _formatDateObj(d, targetFmt) {
       return `${yr}-${monNum}-${dayPadded}`;
     case 'D-Mon-YYYY':
       return `${daySingle}-${monShort}-${yr}`;
+    case 'DD-Mon-YY':
+      return `${dayPadded}-${monShort}-${yr.slice(-2)}`;
     case 'DD-Mon-YYYY':
     default:
       return `${dayPadded}-${monShort}-${yr}`;

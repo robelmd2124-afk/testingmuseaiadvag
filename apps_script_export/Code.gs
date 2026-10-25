@@ -60,6 +60,8 @@ function formatCustomDate(dateInput, monthHint, formatPattern) {
       return dayPadded + '-' + monNum + '-' + yr;
     case 'D-Mon-YYYY':
       return daySingle + '-' + monShort + '-' + yr;
+    case 'DD-Mon-YY':
+      return dayPadded + '-' + monShort + '-' + yr.slice(-2);
     case 'DD-Mon-YYYY':
     default:
       return dayPadded + '-' + monShort + '-' + yr;
