@@ -1306,10 +1306,10 @@
               </button>
             </div>
             <select id="configDateFormatSelect" onchange="setSystemDateFormat(this.value, false)" class="form-control" style="font-weight:600">
-              <option value="DD-Mon-YY">25-Oct-26 (DD-Mon-YY) — Short (Default)</option>
+              <option value="DD-Mon-YYYY">12-Oct-2026 (DD-Mon-YYYY) — Full Year (Default)</option>
+              <option value="DD-Mon-YY">25-Oct-26 (DD-Mon-YY) — Short</option>
               <option value="DD-MM-YYYY">12-10-2026 (DD-MM-YYYY) — Recommended</option>
               <option value="DD/MM/YYYY">12/10/2026 (DD/MM/YYYY) — Slash</option>
-              <option value="DD-Mon-YYYY">12-Oct-2026 (DD-Mon-YYYY) — Alphanumeric</option>
               <option value="YYYY-MM-DD">2026-10-12 (YYYY-MM-DD) — ISO Standard</option>
               <option value="D-Mon-YYYY">1-Oct-2026 (D-Mon-YYYY) — Single-digit Day</option>
             </select>
@@ -1460,10 +1460,10 @@
             <div style="background:var(--card-elevated);border:1px solid rgba(16,185,129,0.35);border-radius:12px;padding:14px">
               <div style="font-weight:800;font-size:13px;color:#10B981;display:flex;align-items:center;gap:6px">
                 <span class="ms" style="font-size:18px">calendar_month</span>
-                Best Date Format for Sheet & App: DD-Mon-YY (e.g. 11-Oct-26)
+                Best Date Format for Sheet & App: DD-Mon-YYYY (e.g. 11-Oct-2026)
               </div>
               <p style="margin:6px 0 0 24px;font-size:12px;color:var(--txt);line-height:1.5">
-                <b>কেন DD-Mon-YY সেরা?</b> গুগল শিট-এ রিজিওনাল সেটিংসের কারণে <code>10/05/2026</code> লিখলে শিট কখনো October 5 আবার কখনো May 10 ধরে ফেলে। কিন্তু <b>11-Oct-26</b> দিলে শিট এবং অ্যাপস দুটোতেই মাস ও দিনের কোনো কনফিউশন হয় না। অ্যাপটিতে ডেট এন্ট্রি দিলে তা স্বয়ংক্রিয়ভাবে এই স্ট্যান্ডার্ড ফরম্যাটে সেভ হয়।
+                <b>কেন DD-Mon-YYYY সেরা?</b> গুগল শিট-এ রিজিওনাল সেটিংসের কারণে <code>10/05/2026</code> লিখলে শিট কখনো October 5 আবার কখনো May 10 ধরে ফেলে। কিন্তু <b>11-Oct-2026</b> দিলে শিট এবং অ্যাপস দুটোতেই মাস ও দিনের কোনো কনফিউশন হয় না। অ্যাপটিতে ডেট এন্ট্রি দিলে তা স্বয়ংক্রিয়ভাবে এই স্ট্যান্ডার্ড ফরম্যাটে সেভ হয়।
               </p>
             </div>
           </div>

@@ -6570,7 +6570,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
     case 'formatAllDates': {
       requireAdmin(req);
       const [chosenFormat] = args;
-      const targetFormat = chosenFormat || 'DD-Mon-YY';
+      const targetFormat = chosenFormat || 'DD-Mon-YYYY';
       const targetUrl = memoryStore.settings.webhook_url;
       if (!targetUrl) {
         return { success: true, message: `Date format set to ${targetFormat} in App settings. No webhook configured, so sheet dates were not rewritten.` };
