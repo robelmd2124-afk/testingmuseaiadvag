@@ -8,8 +8,7 @@ import { google, sheets_v4 } from 'googleapis';
 import path from 'path';
 import {
   MONTHS, MENU, CH, PAYMENT_HEADERS, TODAY_HEADERS, PAGE_SUMMARY_HEADERS,
-  AGENCY_SPENDING_HEADERS, MONTHLY_CLOSING_HEADERS, PAUSE_ADS_HEADERS,
-  SCAM_HEADERS, AGENCY_COST_HEADERS, END_ADS_HEADERS, AD_ACCOUNT_BILLING_HEADERS,
+  AGENCY_SPENDING_HEADERS, MONTHLY_CLOSING_HEADERS, AGENCY_COST_HEADERS, END_ADS_HEADERS, AD_ACCOUNT_BILLING_HEADERS,
   ALL_DATE_HEADERS, isDateHeader, normalizeRowDates,
   parseAnyDate, formatCustomDate, isSameDay, getTodayFormatted, toInputDateValue, calculateEndDate, getNowBST, normalizeCampaign
 } from './src/services/schema.ts';
@@ -194,9 +193,7 @@ interface MemoryStore {
   campaigns: { [sheetName: string]: any[] };
   todayCreated: any[];
   payments: any[];
-  scams: any[];
   agencyCosts: any[];
-  pauseAds: any[];
   monthlyClosing: any[];
   adAccountBilling: { [accountName: string]: AdAccountBillingData };
   campaignVerifications?: { [key: string]: { verified: boolean; verifiedBy: string; verifiedAt: string; notes?: string } };
@@ -217,9 +214,7 @@ const memoryStore: MemoryStore = {
   campaigns: {},
   todayCreated: [],
   payments: [],
-  scams: [],
   agencyCosts: [],
-  pauseAds: [],
   monthlyClosing: [],
   adAccountBilling: {},
   campaignVerifications: {},
@@ -351,37 +346,6 @@ function loadStoreFromDisk(): boolean {
               _recordId: c._recordId || c['Record ID'] || crypto.randomUUID()
             };
           });
-        }
-
-        // 3. Ensure pause ads rows have valid data and clean dates
-        if (Array.isArray(memoryStore.pauseAds)) {
-          memoryStore.pauseAds = memoryStore.pauseAds.filter(isValidPauseAdsRow).map(r => {
-            const dObj = parseAnyDate(r['Date']);
-            return {
-              ...r,
-              'Date': dObj ? formatCustomDate(dObj) : (r['Date'] || getTodayFormatted()),
-              _recordId: r._recordId || r['Record ID'] || crypto.randomUUID()
-            };
-          });
-        }
-
-        // 4. Ensure scams have no demo data and have clean month/year
-        if (Array.isArray(memoryStore.scams)) {
-          memoryStore.scams = memoryStore.scams
-            .filter(isValidScamRow)
-            .filter(s => !String(s['Page Name'] || '').toLowerCase().includes('test page') && !String(s['Page Name'] || '').toLowerCase().includes('demo'))
-            .map(s => {
-              const dObj = parseAnyDate(s['Date']);
-              const m = (s['Month'] && s['Month'] !== 'Month') ? s['Month'] : (dObj ? MONTHS[dObj.getMonth()] : MONTHS[new Date().getMonth()]);
-              const y = s['Year'] ? s['Year'] : (dObj ? String(dObj.getFullYear()) : String(new Date().getFullYear()));
-              return {
-                ...s,
-                'Date': dObj ? formatCustomDate(dObj) : (s['Date'] || getTodayFormatted()),
-                'Month': m,
-                'Year': y,
-                _recordId: s._recordId || s['Record ID'] || crypto.randomUUID()
-              };
-            });
         }
 
         // 5. Ensure agency costs have no blank rows and valid positive costs only
@@ -521,8 +485,6 @@ function seedInitialMemoryStore() {
   memoryStore.campaigns = {};
   memoryStore.todayCreated = [];
   memoryStore.payments = [];
-  memoryStore.pauseAds = [];
-  memoryStore.scams = [];
   memoryStore.agencyCosts = [];
   memoryStore.monthlyClosing = [];
   // No hardcoded data: the store starts empty and is filled only by syncing
@@ -790,28 +752,6 @@ function isValidPaymentRow(r: any): boolean {
   return paid > 0 || Boolean(method);
 }
 
-function isValidScamRow(r: any): boolean {
-  if (!r) return false;
-  const page = String(r['Page Name'] || r['page_name'] || '').trim();
-  const sl = String(r['SL NO'] || r['sl_no'] || r['SL'] || '').trim();
-  const spent = parseFloat(r['Spent'] || r['spent'] || 0) || 0;
-  const taka = parseFloat(r['Taka'] || r['taka'] || 0) || 0;
-  if (page.toLowerCase() === 'page name' || sl.toLowerCase() === 'sl no' || sl.toLowerCase() === 'sl') return false;
-  // A scam row is valid if it has page name, SL, or positive spent/taka
-  return Boolean(page || sl || spent > 0 || taka > 0);
-}
-
-function isValidPauseAdsRow(r: any): boolean {
-  if (!r) return false;
-  const page = String(r['Page Name'] || r['page_name'] || r['Page'] || r['page'] || '').trim();
-  const sl = String(r['SL NO'] || r['sl_no'] || r['SL'] || r['sl'] || '').trim();
-  const budget = parseFloat(r['Budget'] || r['budget'] || 0) || 0;
-  const spent = parseFloat(r['Spent'] || r['spent'] || 0) || 0;
-  if (page.toLowerCase() === 'page name' || sl.toLowerCase() === 'sl no' || sl.toLowerCase() === 'sl') return false;
-  // A pause ad row is valid if it has a page name, SL, or positive budget/spent
-  return Boolean(page || sl || budget > 0 || spent > 0);
-}
-
 async function fetchSheetCsvGviz(sheetId: string, sheetName?: string): Promise<{ headers: string[], rows: string[][] } | null> {
   try {
     const urlsToTry: string[] = [];
@@ -901,7 +841,7 @@ async function discoverSheetNamesFromHtml(sheetId: string): Promise<string[]> {
   MONTHS.forEach(m => {
     discovered.add(`Campaign_${m}_${currentYear}`);
   });
-  ['Payments', 'Page List', 'Ad Accounts', 'Agency_Cost', 'Scam', 'Monthly_Closing', 'Pause_ADS'].forEach(n => discovered.add(n));
+  ['Payments', 'Page List', 'Ad Accounts', 'Agency_Cost', 'Monthly_Closing'].forEach(n => discovered.add(n));
 
   // Exclude Today_Created tab so historical records across all months are not mixed into campaign counts
   return Array.from(discovered).filter(t => !t.toLowerCase().includes('today'));
@@ -1256,80 +1196,6 @@ function ingestSheetRows(title: string, headers: string[], dataRows: any[][]) {
         memoryStore.todayCreated = mergedToday;
       }
     }
-    return;
-  }
-
-  // 3. Pause ADS / New Pages
-  if (lowerTitle.includes('pause') || lowerTitle.includes('new_page')) {
-    const valid = parsed.filter(isValidPauseAdsRow);
-    const remotePause = valid.map(r => {
-      const rawDate = r['Date'] || r['date'] || r['Pause Date'] || r['pause_date'] || r['Date '] || r['Entry Date'] || r['entry_date'] || r['Date/Time'] || r['Entry'] || '';
-      const dObj = parseAnyDate(rawDate);
-      const formattedDate = dObj ? formatCustomDate(dObj) : (rawDate ? String(rawDate).trim() : '');
-      const budget = parseFloat(r['Budget'] || r['budget'] || 0) || 0;
-      const spent = parseFloat(r['Spent'] || r['spent'] || 0) || 0;
-      return {
-        ...r,
-        'Date': formattedDate,
-        'SL NO': String(r['SL NO'] || r['sl_no'] || r['SL'] || r['sl'] || '').trim(),
-        'Page Name': String(r['Page Name'] || r['page_name'] || r['Page'] || '').trim(),
-        'Budget': budget,
-        'Spent': spent,
-        'Remaining': +(budget - spent).toFixed(2)
-      };
-    });
-    const mergedPause = [...remotePause];
-    (memoryStore.pauseAds || []).forEach(localP => {
-      const recId = String(localP['Record ID'] || localP._recordId || '').trim();
-      const isPresent = mergedPause.some(sp => {
-        const spRecId = String(sp['Record ID'] || sp._recordId || '').trim();
-        if (recId && spRecId && recId === spRecId) return true;
-        return sp['Page Name'] === localP['Page Name'] && sp['Date'] === localP['Date'] && sp['Budget'] === localP['Budget'];
-      });
-      if (!isPresent) mergedPause.push(localP);
-    });
-    memoryStore.pauseAds = mergedPause;
-    return;
-  }
-
-  // 4. Scam
-  if (lowerTitle.includes('scam')) {
-    const valid = parsed.filter(isValidScamRow);
-    const remoteScam = valid.map(r => {
-      const rawDate = r['Date'] || r['date'] || r['Scam Date'] || r['Entry'] || '';
-      const dObj = parseAnyDate(rawDate);
-      const formattedDate = dObj ? formatCustomDate(dObj) : (rawDate ? String(rawDate).trim() : getTodayFormatted());
-      const month = dObj ? MONTHS[dObj.getMonth()] : (r['Month'] || MONTHS[new Date().getMonth()]);
-      const year = dObj ? String(dObj.getFullYear()) : (r['Year'] || String(new Date().getFullYear()));
-      const spent = parseFloat(r['Spent'] || r['spent'] || 0) || 0;
-      const rate = parseFloat(r['Rate'] || r['rate'] || 140) || 140;
-      const taka = parseFloat(r['Taka'] || r['taka'] || 0) || +(spent * rate).toFixed(2);
-      const perPerson = parseFloat(r['Per Person Taka'] || r['per_person_taka'] || 0) || +(taka / 2).toFixed(2);
-      return {
-        ...r,
-        'Date': formattedDate,
-        'SL NO': String(r['SL NO'] || r['sl_no'] || r['SL'] || '').trim(),
-        'Page Name': String(r['Page Name'] || r['page_name'] || '').trim(),
-        'Spent': spent,
-        'Taka': taka,
-        'Per Person Taka': perPerson,
-        'Rate': rate,
-        'Month': month,
-        'Year': String(year),
-        'Entry': r['Entry'] || formattedDate
-      };
-    });
-    const mergedScams = [...remoteScam];
-    (memoryStore.scams || []).forEach(localS => {
-      const recId = String(localS['Record ID'] || localS._recordId || '').trim();
-      const isPresent = mergedScams.some(sp => {
-        const spRecId = String(sp['Record ID'] || sp._recordId || '').trim();
-        if (recId && spRecId && recId === spRecId) return true;
-        return sp['Page Name'] === localS['Page Name'] && sp['Date'] === localS['Date'];
-      });
-      if (!isPresent) mergedScams.push(localS);
-    });
-    memoryStore.scams = mergedScams;
     return;
   }
 
@@ -1708,8 +1574,6 @@ async function ensureBaseSheets() {
     ['Page_Summary', PAGE_SUMMARY_HEADERS],
     ['Agency_Spending', AGENCY_SPENDING_HEADERS],
     ['Monthly_Closing', MONTHLY_CLOSING_HEADERS],
-    ['Pause_ADS', PAUSE_ADS_HEADERS],
-    ['Scam', SCAM_HEADERS],
     ['Agency_Cost', AGENCY_COST_HEADERS],
     ['End_ADS', END_ADS_HEADERS]
   ];
@@ -1734,9 +1598,6 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
   }
   if ((lowerName.includes('agency_cost') || lowerName === 'cost') && memoryStore.agencyCosts.length > 0) {
     return memoryStore.agencyCosts.filter(isValidAgencyCostRow);
-  }
-  if (lowerName.includes('scam') && memoryStore.scams.length > 0) {
-    return memoryStore.scams.filter(isValidScamRow);
   }
   if ((lowerName === 'today_created' || lowerName === 'today') && memoryStore.todayCreated.length > 0) {
     return memoryStore.todayCreated.filter(isValidCampaignRow);
@@ -1787,31 +1648,12 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
               if (lower === 'year') o['Year'] = val;
             });
             // Positional fallbacks if specific headers missing in user's sheet
-            if (lowerName.includes('pause') || lowerName.includes('new_page')) {
-              if (!o['Date'] && row[0]) o['Date'] = row[0];
-              if (!o['SL NO'] && row[1]) o['SL NO'] = row[1];
-              if (!o['Page Name'] && row[2]) o['Page Name'] = row[2];
-              if (!o['Budget'] && row[3]) o['Budget'] = row[3];
-              if (!o['Spent'] && row[4]) o['Spent'] = row[4];
-              if (!o['Remaining'] && row[5]) o['Remaining'] = row[5];
-            }
             if (lowerName.includes('payment')) {
               if (!o['Date'] && row[0]) o['Date'] = row[0];
               if (!o['Payment Method'] && row[1]) o['Payment Method'] = row[1];
               if (!o['Paid (৳)'] && (row[2] !== undefined && row[2] !== '')) o['Paid (৳)'] = row[2];
               if (!o['Month'] && row[3]) o['Month'] = row[3];
               if (!o['Year'] && row[4]) o['Year'] = row[4];
-            }
-            if (lowerName.includes('scam')) {
-              if (!o['Date'] && row[0]) o['Date'] = row[0];
-              if (!o['SL NO'] && row[1]) o['SL NO'] = row[1];
-              if (!o['Page Name'] && row[2]) o['Page Name'] = row[2];
-              if (!o['Spent'] && row[3]) o['Spent'] = row[3];
-              if (!o['Taka'] && row[4]) o['Taka'] = row[4];
-              if (!o['Per Person Taka'] && row[5]) o['Per Person Taka'] = row[5];
-              if (!o['Rate'] && row[6]) o['Rate'] = row[6];
-              if (!o['Month'] && row[8]) o['Month'] = row[8];
-              if (!o['Year'] && row[9]) o['Year'] = row[9];
             }
             if (lowerName.includes('agency_cost') || lowerName === 'cost') {
               if (!o['Month'] && row[0]) o['Month'] = row[0];
@@ -1831,10 +1673,6 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
             result = mapped.filter(isValidAgencyCostRow);
           } else if (lowerName.includes('payment')) {
             result = mapped.filter(isValidPaymentRow);
-          } else if (lowerName.includes('scam')) {
-            result = mapped.filter(isValidScamRow);
-          } else if (lowerName.includes('pause') || lowerName.includes('new_page')) {
-            result = mapped.filter(isValidPauseAdsRow);
           } else {
             result = mapped.filter(row => Object.values(row).some(v => v !== '' && v !== null && v !== undefined && v !== 0 && v !== '0'));
           }
@@ -1864,14 +1702,8 @@ async function readRows(name: string, headers: string[]): Promise<any[]> {
   if (lowerName.includes('payment')) {
     return memoryStore.payments.filter(isValidPaymentRow);
   }
-  if (lowerName.includes('scam')) {
-    return memoryStore.scams.filter(isValidScamRow);
-  }
   if (lowerName.includes('agency_cost') || lowerName === 'cost') {
     return memoryStore.agencyCosts.filter(isValidAgencyCostRow);
-  }
-  if (lowerName.includes('pause') || lowerName.includes('new_page')) {
-    return memoryStore.pauseAds.filter(isValidPauseAdsRow);
   }
   if (lowerName.includes('monthly_closing') || lowerName.includes('closing')) {
     return [...memoryStore.monthlyClosing];
@@ -2007,26 +1839,12 @@ async function appendRow(name: string, headers: string[], row: any, immediateSyn
         _row: memoryStore.payments.length + 2
       });
     }
-  } else if (name === 'Scam') {
-    const existingIdx = memoryStore.scams.findIndex(isRowMatch);
-    if (existingIdx >= 0) {
-      memoryStore.scams[existingIdx] = { ...memoryStore.scams[existingIdx], ...row };
-    } else {
-      memoryStore.scams.push({ ...row, _row: memoryStore.scams.length + 2 });
-    }
   } else if (name === 'Agency_Cost') {
     const existingIdx = memoryStore.agencyCosts.findIndex(isRowMatch);
     if (existingIdx >= 0) {
       memoryStore.agencyCosts[existingIdx] = { ...memoryStore.agencyCosts[existingIdx], ...row };
     } else {
       memoryStore.agencyCosts.push({ ...row, _row: memoryStore.agencyCosts.length + 2 });
-    }
-  } else if (name === 'Pause_ADS') {
-    const existingIdx = memoryStore.pauseAds.findIndex(isRowMatch);
-    if (existingIdx >= 0) {
-      memoryStore.pauseAds[existingIdx] = { ...memoryStore.pauseAds[existingIdx], ...row };
-    } else {
-      memoryStore.pauseAds.push({ ...row, _row: memoryStore.pauseAds.length + 2 });
     }
   } else if (name === 'Monthly_Closing') {
     const existingIdx = memoryStore.monthlyClosing.findIndex(m => m.Month === row.Month && String(m.Year) === String(row.Year));
@@ -2164,18 +1982,6 @@ async function resolveServerSheetTab(
       if (pay) return pay;
     }
 
-    // 5. Pause ads
-    if (cleanReq.includes('pause') || cleanReq.includes('new_page')) {
-      const pause = sheets.find(s => s.title.toLowerCase().includes('pause') || s.title.toLowerCase().includes('new_page'));
-      if (pause) return pause;
-    }
-
-    // 6. Scam
-    if (cleanReq.includes('scam')) {
-      const scam = sheets.find(s => s.title.toLowerCase().includes('scam'));
-      if (scam) return scam;
-    }
-
     // 7. Agency cost
     if (cleanReq.includes('cost') || cleanReq.includes('agency_cost')) {
       const cost = sheets.find(s => s.title.toLowerCase().includes('cost'));
@@ -2307,9 +2113,7 @@ function lookupKnownRowNo(name: string, recordId?: string): number | undefined {
     if (memoryStore.campaigns[name]) collections.push(memoryStore.campaigns[name]);
     Object.values(memoryStore.campaigns).forEach(list => { if (list !== memoryStore.campaigns[name]) collections.push(list); });
   } else if (name === 'Payments') collections.push(memoryStore.payments || []);
-  else if (name === 'Scam') collections.push(memoryStore.scams || []);
   else if (name === 'Agency_Cost') collections.push(memoryStore.agencyCosts || []);
-  else if (name === 'Pause_ADS') collections.push(memoryStore.pauseAds || []);
   else if (name === 'Today_Created') collections.push(memoryStore.todayCreated || []);
   for (const list of collections) {
     const hit = (list || []).find(r => (String(r['Record ID'] || '').trim() === rid || String(r._recordId || '').trim() === rid) && typeof r._row === 'number' && r._row > 1);
@@ -2435,8 +2239,6 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
   if (name === 'Payments') oldRow = findOldRow(memoryStore.payments);
   else if (name.startsWith('Campaign_') && memoryStore.campaigns[name]) oldRow = findOldRow(memoryStore.campaigns[name]);
   else if (name === 'Today_Created') oldRow = findOldRow(memoryStore.todayCreated);
-  else if (name === 'Pause_ADS') oldRow = findOldRow(memoryStore.pauseAds);
-  else if (name === 'Scam') oldRow = findOldRow(memoryStore.scams);
   else if (name === 'Agency_Cost') oldRow = findOldRow(memoryStore.agencyCosts);
   // MatchInfo for the sheet write: OLD content for payment fields (see
   // above), so content matching in the connector finds the existing row.
@@ -2463,12 +2265,6 @@ async function updateRowAt(name: string, headers: string[], rowNo?: number, row?
   } else if (name === 'Today_Created') {
     const idx = memoryStore.todayCreated.findIndex(r => isMatch(r));
     if (idx >= 0) memoryStore.todayCreated[idx] = { ...row, _row: targetRowNo || memoryStore.todayCreated[idx]._row };
-  } else if (name === 'Pause_ADS') {
-    const idx = memoryStore.pauseAds.findIndex(r => isMatch(r));
-    if (idx >= 0) memoryStore.pauseAds[idx] = { ...row, _row: targetRowNo || memoryStore.pauseAds[idx]._row };
-  } else if (name === 'Scam') {
-    const idx = memoryStore.scams.findIndex(r => isMatch(r));
-    if (idx >= 0) memoryStore.scams[idx] = { ...row, _row: targetRowNo || memoryStore.scams[idx]._row };
   } else if (name === 'Agency_Cost') {
     const idx = memoryStore.agencyCosts.findIndex(r => isMatch(r));
     if (idx >= 0) memoryStore.agencyCosts[idx] = { ...row, _row: targetRowNo || memoryStore.agencyCosts[idx]._row };
@@ -2575,12 +2371,6 @@ async function deleteRowAt(name: string, rowNo?: number, recordId?: string, matc
   }
   if (name === 'Today_Created' || name.toLowerCase().includes('today')) {
     memoryStore.todayCreated = memoryStore.todayCreated.filter(r => !isMatch(r));
-  }
-  if (name === 'Pause_ADS' || name.toLowerCase().includes('pause')) {
-    memoryStore.pauseAds = memoryStore.pauseAds.filter(r => !isMatch(r));
-  }
-  if (name === 'Scam' || name.toLowerCase().includes('scam')) {
-    memoryStore.scams = memoryStore.scams.filter(r => !isMatch(r));
   }
   if (name === 'Agency_Cost' || name.toLowerCase().includes('cost')) {
     memoryStore.agencyCosts = memoryStore.agencyCosts.filter(r => !isMatch(r));
@@ -4739,99 +4529,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         list.sort((a, b) => (Number(b['Total Budget $']) || 0) - (Number(a['Total Budget $']) || 0));
         return { success: true, headers: PAGE_SUMMARY_HEADERS, rows: list };
       }
-      if (k === 'new_pages') {
-        const rows = (await readRows('Pause_ADS', PAUSE_ADS_HEADERS)).filter(isValidPauseAdsRow);
-        const mapped = rows.map(r => {
-          const rawDate = String(r['Date'] || r['date'] || r['Pause Date'] || r['pause_date'] || r['Date '] || r['Entry Date'] || r['Entry'] || '').trim();
-          const rMonthDeclared = (r['Month'] || r['month']) ? String(r['Month'] || r['month']).trim() : '';
-          const dObj = parseAnyDate(rawDate, rMonthDeclared);
-          const rMonth = rMonthDeclared || (dObj ? MONTHS[dObj.getMonth()] : '');
-          const rYear = (r['Year'] || r['year']) ? String(r['Year'] || r['year']).trim() : (dObj ? String(dObj.getFullYear()) : '');
-          
-          // Preserve authentic date string from sheet if already formatted (e.g. 25-Aug-2026), else format cleanly
-          let cleanDate = rawDate;
-          if (dObj) {
-            cleanDate = formatCustomDate(dObj, rMonth);
-          }
-          return {
-            ...r,
-            'Date': cleanDate || rawDate,
-            _month: rMonth,
-            _year: rYear
-          };
-        });
-        const filtered = mapped.filter(r => {
-          if (f.month && f.month !== 'All Months') {
-            const mLower = String(f.month).toLowerCase();
-            const rMLower = String(r._month || '').toLowerCase();
-            const rawLower = String(r['Date'] || '').toLowerCase();
-            if (rMLower && rMLower !== mLower && !rawLower.includes(mLower.slice(0, 3))) return false;
-          }
-          if (f.year && f.year !== 'All Years') {
-            const yStr = String(f.year);
-            const rYStr = String(r._year || '');
-            const rawStr = String(r['Date'] || '');
-            if (rYStr && rYStr !== yStr && !rawStr.includes(yStr)) return false;
-          }
-          return true;
-        });
-        const finalRows = (!f.month || f.month === 'All Months') ? mapped : filtered;
-        finalRows.sort((a, b) => {
-          const da = parseAnyDate(a['Date'], a._month)?.getTime() || 0;
-          const db = parseAnyDate(b['Date'], b._month)?.getTime() || 0;
-          if (da !== db) return db - da;
-          return (b._row || 0) - (a._row || 0);
-        });
-        return { success: true, headers: PAUSE_ADS_HEADERS, rows: finalRows };
-      }
-      if (k === 'scam') {
-        const rows = (await readRows('Scam', SCAM_HEADERS))
-          .filter(isValidScamRow)
-          .filter(r => {
-            const p = String(r['Page Name'] || '').toLowerCase();
-            const sl = String(r['SL NO'] || '').toLowerCase();
-            if (p.includes('demo') || p.includes('test') || p.includes('sample')) return false;
-            if (sl.includes('demo') || sl.includes('test')) return false;
-            return true;
-          });
-        const mapped = rows.map(r => {
-          const rawDate = String(r['Date'] || r['date'] || r['Entry'] || '').trim();
-          const rMonthDeclared = (r.Month || r['Month']) ? String(r.Month || r['Month']).trim() : '';
-          const dObj = parseAnyDate(rawDate, rMonthDeclared);
-          const rMonth = rMonthDeclared || (dObj ? MONTHS[dObj.getMonth()] : '');
-          const rYear = (r.Year || r['Year']) ? String(r.Year || r['Year']).trim() : (dObj ? String(dObj.getFullYear()) : '');
-          return {
-            ...r,
-            'Date': dObj ? formatCustomDate(dObj, rMonth) : rawDate,
-            _month: rMonth,
-            _year: rYear
-          };
-        });
-        const filtered = mapped.filter(r => {
-          if (f.month && f.month !== 'All Months') {
-            const mLower = String(f.month).toLowerCase();
-            const rMLower = String(r._month || r.Month || '').toLowerCase();
-            const rawLower = String(r['Date'] || '').toLowerCase();
-            const matchesMonth = (rMLower === mLower) || rawLower.includes(mLower.slice(0, 3));
-            if (!matchesMonth) return false;
-          }
-          if (f.year && f.year !== 'All Years') {
-            const yStr = String(f.year);
-            const rYStr = String(r._year || r.Year || '');
-            const rawStr = String(r['Date'] || '');
-            if (rYStr && rYStr !== yStr && !rawStr.includes(yStr)) return false;
-          }
-          return true;
-        });
-        const finalRows = (!f.month || f.month === 'All Months') ? mapped : filtered;
-        finalRows.sort((a, b) => {
-          const da = parseAnyDate(a['Date'], a._month)?.getTime() || 0;
-          const db = parseAnyDate(b['Date'], b._month)?.getTime() || 0;
-          if (da !== db) return db - da;
-          return (b._row || 0) - (a._row || 0);
-        });
-        return { success: true, headers: SCAM_HEADERS, rows: finalRows };
-      }
       if (k === 'agency_cost') {
         const rows = (await readRows('Agency_Cost', AGENCY_COST_HEADERS)).filter(isValidAgencyCostRow);
         const mapped = rows.map(r => {
@@ -4869,40 +4566,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         });
         const finalRows = isAllMonths ? mapped : filtered;
 
-        const scamRows = (await readRows('Scam', SCAM_HEADERS)).filter(isValidScamRow);
-        const scamMapped = scamRows.map(s => {
-          const rawDate = String(s['Date'] || s['date'] || '').trim();
-          const dObj = parseAnyDate(rawDate);
-          const rMonth = String((dObj ? MONTHS[dObj.getMonth()] : '') || s.Month || MONTHS[new Date().getMonth()]).trim();
-          const rYear = String((dObj ? String(dObj.getFullYear()) : '') || s.Year || String(new Date().getFullYear())).trim();
-          const recId = s['Record ID'] || s._recordId || `SCAM_${s._row || Date.now()}`;
-          return {
-            ...s,
-            'Date': dObj ? formatCustomDate(dObj, rMonth) : rawDate,
-            'Month': rMonth,
-            'Year': rYear,
-            'Page Name': s['Page Name'] || s['page_name'] || '',
-            'Budget': parseFloat(s['Spent'] || s['Budget'] || 0) || 0,
-            'Taka': parseFloat(s['Taka'] || 0) || 0,
-            'Record ID': recId,
-            _recordId: recId,
-            _month: rMonth,
-            _year: rYear
-          };
-        });
-        const scamFiltered = scamMapped.filter(s => {
-          if (!isAllMonths && s._month && s._month.toLowerCase() !== String(f.month).toLowerCase()) return false;
-          if (!isAllYears && s._year && s._year !== String(f.year)) return false;
-          return true;
-        });
-        const finalScamRows = isAllMonths ? scamMapped : scamFiltered;
-
         return {
           success: true,
           headers: AGENCY_COST_HEADERS,
-          rows: finalRows.reverse(),
-          scamRows: finalScamRows.reverse(),
-          scamHeaders: SCAM_HEADERS
+          rows: finalRows.reverse()
         };
       }
       if (k === 'payment_due_tracker' || k === 'agency_spending') {
@@ -5128,40 +4795,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           newBudget: cls.newBudget,
           oldPages: cls.oldPages,
           oldBudget: cls.oldBudget
-        };
-      }
-      if (k === 'new_pages') {
-        const rows = await readRows('Pause_ADS', PAUSE_ADS_HEADERS);
-        const totalBudget = rows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0);
-        const totalSpent = rows.reduce((s, r) => s + (Number(r['Spent']) || 0), 0);
-        return {
-          success: true,
-          totalRecords: rows.length,
-          totalBudget,
-          totalSpent,
-          totalRemaining: totalBudget - totalSpent
-        };
-      }
-      if (k === 'scam') {
-        const rows = (await readRows('Scam', SCAM_HEADERS)).filter(isValidScamRow);
-        const filtered = rows.filter(r => {
-          const dObj = parseAnyDate(r['Date']);
-          const rMonth = r.Month || (dObj ? MONTHS[dObj.getMonth()] : '');
-          const rYear = r.Year || (dObj ? String(dObj.getFullYear()) : '');
-          if (mn && rMonth && String(rMonth).toLowerCase() !== String(mn).toLowerCase()) return false;
-          if (yr && rYear && String(rYear) !== String(yr)) return false;
-          return true;
-        });
-        const totalSpent = filtered.reduce((s, r) => s + (Number(r['Spent']) || 0), 0);
-        const totalTaka = filtered.reduce((s, r) => s + (Number(r['Taka']) || 0), 0);
-        return {
-          success: true,
-          totalRecords: filtered.length,
-          totalSpent,
-          totalTaka,
-          perPersonTaka: +(totalTaka / 2).toFixed(2),
-          month: mn,
-          year: yr
         };
       }
       if (k === 'agency_cost') {
@@ -6121,172 +5754,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       }
       return { success: true, pages: await getPages() };
     }
-    case 'addScam': {
-      requireAdmin(req);
-      const [d] = args;
-      const slNo = String(d.sl_no || '').replace(/^#/, '').trim();
-      const numSl = parseInt(slNo, 10);
-      const spent = Number(d.spent || 0);
-      const rate = await getRate();
-      const taka = +(spent * rate).toFixed(2);
-      const perPerson = +(taka / 2).toFixed(2);
-      const parsedDate = parseAnyDate(d.date);
-      const month = parsedDate ? MONTHS[parsedDate.getMonth()] : (d.month || MONTHS[new Date().getMonth()]);
-      const year = parsedDate ? String(parsedDate.getFullYear()) : (d.year || String(new Date().getFullYear()));
-      const formattedDate = parsedDate ? formatCustomDate(parsedDate) : getTodayFormatted();
-      const scamId = crypto.randomUUID();
-      const newScamRow = {
-        'Date': formattedDate,
-        'SL NO': slNo,
-        'Page Name': String(d.page_name || '').trim(),
-        'Spent': spent,
-        'Taka': taka,
-        'Per Person Taka': perPerson,
-        'Rate': rate,
-        'Month': month,
-        'Year': year,
-        'Entry': getTodayFormatted(),
-        'Record ID': scamId,
-        _recordId: scamId
-      };
-      await appendRow('Scam', SCAM_HEADERS, newScamRow);
-      saveStoreToDisk();
-
-      // Requirement 4: Scamm entry dile OI SL no all campaign theke delete hoye jabe oi full row ta tokhon only scamm ey hiseb hoibe
-      if (slNo) {
-        const pureSl = slNo.includes('/') ? slNo.split('/')[0].trim() : slNo;
-        const numSl = parseInt(pureSl, 10);
-        const matchSl = (x: any) => {
-          if (!x) return false;
-          const s = String(x['SL'] || x.sl || x.sl_no || '').replace(/^#/, '').trim();
-          if (!s) return false;
-          const xPure = s.includes('/') ? s.split('/')[0].trim() : s;
-          const xNum = parseInt(xPure, 10);
-          if (xPure.toLowerCase() === pureSl.toLowerCase()) return true;
-          if (xPure.padStart(3, '0') === pureSl.padStart(3, '0')) return true;
-          if (!isNaN(numSl) && !isNaN(xNum) && xNum === numSl) return true;
-          if (s.toLowerCase() === slNo.toLowerCase()) return true;
-          return false;
-        };
-
-        // 1. Delete from memoryStore.campaigns across all sheets & delete from sheet
-        for (const [sheetTitle, rows] of Object.entries(memoryStore.campaigns)) {
-          if (!Array.isArray(rows)) continue;
-          let idx = 0;
-          let modified = false;
-          while (idx < rows.length) {
-            if (matchSl(rows[idx])) {
-              const rowToDelete = rows[idx];
-              rows.splice(idx, 1);
-              modified = true;
-              await deleteRowAt(sheetTitle, rowToDelete._row, rowToDelete['Record ID'] || rowToDelete._recordId, {
-                SL: rowToDelete.SL || pureSl,
-                'Record ID': rowToDelete['Record ID'] || rowToDelete._recordId,
-                'Page Name': rowToDelete['Page Name'],
-                month: rowToDelete.Month || month,
-                year: rowToDelete.Year || year
-              });
-            } else {
-              idx++;
-            }
-          }
-          if (modified) invalidateSheetCache(sheetTitle);
-        }
-
-        // 2. Also check current month's campaign sheet directly to ensure complete deletion
-        const targetSheetName = campaignSheetName(month, year);
-        const currentMonthRows = await readRows(targetSheetName, CH);
-        for (const r of currentMonthRows) {
-          if (matchSl(r)) {
-            await deleteRowAt(targetSheetName, r._row, r['Record ID'] || r._recordId, {
-              SL: r.SL || pureSl,
-              'Record ID': r['Record ID'] || r._recordId,
-              'Page Name': r['Page Name'],
-              month,
-              year
-            });
-            invalidateSheetCache(targetSheetName);
-          }
-        }
-
-        // 3. Delete from Today_Created if present
-        if (Array.isArray(memoryStore.todayCreated)) {
-          let tcIdx = 0;
-          let tcModified = false;
-          while (tcIdx < memoryStore.todayCreated.length) {
-            if (matchSl(memoryStore.todayCreated[tcIdx])) {
-              const tcRow = memoryStore.todayCreated[tcIdx];
-              memoryStore.todayCreated.splice(tcIdx, 1);
-              tcModified = true;
-              await deleteRowAt('Today_Created', tcRow._row, tcRow['Record ID'] || tcRow._recordId, {
-                SL: tcRow.SL || pureSl,
-                'Record ID': tcRow['Record ID'] || tcRow._recordId,
-                'Page Name': tcRow['Page Name']
-              });
-            } else {
-              tcIdx++;
-            }
-          }
-          if (tcModified) invalidateSheetCache('Today_Created');
-        }
-
-        saveStoreToDisk();
-      }
-      invalidateSheetCache('Scam');
-      saveStoreToDisk();
-
-      return { success: true, record: newScamRow };
-    }
-    case 'updateScam': {
-      requireAdmin(req);
-      const [id, d] = args;
-      const rows = await readRows('Scam', SCAM_HEADERS);
-      const r = rows.find(x => String(x._recordId) === String(id) || String(x._row) === String(id));
-      if (r) {
-        await updateRowAt('Scam', SCAM_HEADERS, r._row, { ...r, ...d });
-        invalidateSheetCache('Scam');
-        saveStoreToDisk();
-        return { success: true };
-      }
-      return { success: false, message: 'Scam record not found' };
-    }
-    case 'deleteScam': {
-      requireAdmin(req);
-      const [id, clientRow] = args;
-      const cleanId = String(id || clientRow?._recordId || clientRow?.['Record ID'] || '').trim();
-      const targetSl = String(clientRow?.['SL NO'] || clientRow?.sl_no || clientRow?.SL || (Number(cleanId) ? cleanId : '')).replace(/^#/, '').trim();
-      const rows = await readRows('Scam', SCAM_HEADERS);
-      const isMatch = (x: any) => {
-        if (!x) return false;
-        if (cleanId && (String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId || String(x._row) === cleanId)) return true;
-        if (targetSl) {
-          const xSl = String(x['SL NO'] || x.sl_no || x.SL || '').replace(/^#/, '').trim();
-          if (xSl && (xSl === targetSl || xSl.padStart(3, '0') === targetSl.padStart(3, '0'))) return true;
-        }
-        if (clientRow && clientRow['Page Name'] && x['Page Name']) {
-          const cp = String(clientRow['Page Name']).trim().toLowerCase();
-          const xp = String(x['Page Name']).trim().toLowerCase();
-          if (cp === xp && targetSl) return true;
-        }
-        return false;
-      };
-
-      const r = rows.find(isMatch) || (Array.isArray(memoryStore.scams) ? memoryStore.scams.find(isMatch) : null) || clientRow;
-      const matchInfo = {
-        'Record ID': cleanId || r?.['Record ID'] || r?._recordId,
-        'SL NO': r?.['SL NO'] || targetSl,
-        SL: r?.['SL NO'] || targetSl,
-        'Page Name': r?.['Page Name'] || clientRow?.['Page Name']
-      };
-
-      await deleteRowAt('Scam', r?._row, cleanId, matchInfo);
-      invalidateSheetCache('Scam');
-      if (Array.isArray(memoryStore.scams)) {
-        memoryStore.scams = memoryStore.scams.filter(x => !isMatch(x));
-      }
-      saveStoreToDisk();
-      return { success: true };
-    }
     case 'addAgencyCost': {
       requireAdmin(req);
       const [d] = args;
@@ -6366,161 +5833,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       invalidateSheetCache('Agency_Cost');
       if (Array.isArray(memoryStore.agencyCosts)) {
         memoryStore.agencyCosts = memoryStore.agencyCosts.filter(x => !isMatch(x));
-      }
-      saveStoreToDisk();
-      return { success: true };
-    }
-    case 'addPauseAds': {
-      requireAdmin(req);
-      const [d] = args;
-      const cleanSl = String(d.sl_no || '').replace(/^#/, '').trim();
-      const pureSl = cleanSl.includes('/') ? cleanSl.split('/')[0].trim() : cleanSl;
-      const numSl = parseInt(pureSl, 10);
-      let budget = Number(d.budget || 0);
-      const spent = Number(d.spent || 0);
-
-      // Check if this campaign has OFF $
-      // Requirement 4: Pause ads er somoi j SL no dewa hoibe jodi o sl no er OFF $ kono entr thake tahole OFF $ + Budget= Budget hoibe only pause er jonne
-      if (pureSl) {
-        const allCamp = await campaignRows('All');
-        const camp = allCamp.find(x => {
-          const s = String(x['SL'] || x.sl || x.sl_no || '').replace(/^#/, '').trim();
-          const xPure = s.includes('/') ? s.split('/')[0].trim() : s;
-          const xNum = parseInt(xPure, 10);
-          return xPure === pureSl || xPure.padStart(3, '0') === pureSl.padStart(3, '0') || (!isNaN(numSl) && !isNaN(xNum) && xNum === numSl);
-        });
-        if (camp) {
-          const offUsd = parseFloat(camp['OFF $'] || camp['OFF USD'] || camp['OFF'] || camp.off || 0) || 0;
-          const campBudget = Number(camp['Budget'] || camp.budget || 0);
-          if (offUsd > 0) {
-            if (budget <= campBudget || Math.abs(budget - campBudget) < 0.01) {
-              budget = +(offUsd + campBudget).toFixed(2);
-            }
-          }
-        }
-      }
-
-      const parsedDate = parseAnyDate(d.date);
-      const formattedDate = parsedDate ? formatCustomDate(parsedDate) : getTodayFormatted();
-      const recId = crypto.randomUUID();
-      const newPauseRow = {
-        'Date': formattedDate,
-        'SL NO': String(d.sl_no || '').trim(),
-        'Page Name': String(d.page_name || '').trim(),
-        'Budget': budget,
-        'Spent': spent,
-        'Remaining': +(budget - spent).toFixed(2),
-        'Record ID': recId,
-        _recordId: recId
-      };
-      await appendRow('Pause_ADS', PAUSE_ADS_HEADERS, newPauseRow);
-      invalidateSheetCache('Pause_ADS');
-      saveStoreToDisk();
-      return { success: true, record: newPauseRow };
-    }
-    case 'updatePauseAds': {
-      requireAdmin(req);
-      const [id, d] = args;
-      const rows = await readRows('Pause_ADS', PAUSE_ADS_HEADERS);
-      const cleanId = String(id || '').trim();
-      const targetSl = String(d['SL NO'] || d.sl_no || d.SL || '').trim();
-      const originalSl = String(d.originalSl || '').trim();
-      const r = rows.find(x => 
-        (cleanId && (String(x._recordId) === cleanId || String(x._row) === cleanId || String(x['Record ID'] || '').trim() === cleanId)) ||
-        (originalSl && String(x['SL NO'] || x.sl_no || '').trim() === originalSl) ||
-        (targetSl && String(x['SL NO'] || x.sl_no || '').trim() === targetSl) ||
-        (cleanId && String(x['SL NO'] || x.sl_no || '').trim() === cleanId)
-      );
-      if (r) {
-        const budget = Number(d.Budget ?? d.budget ?? r.Budget ?? r['Budget'] ?? 0);
-        const spent = Number(d.Spent ?? d.spent ?? r.Spent ?? r['Spent'] ?? 0);
-        const remaining = +(budget - spent).toFixed(2);
-        const updated = {
-          ...r,
-          ...d,
-          'Date': d.Date || d.date || r.Date || r['Date'],
-          'SL NO': String(d['SL NO'] || d.sl_no || r['SL NO'] || r.sl_no || '').trim(),
-          'Page Name': String(d['Page Name'] || d.page_name || r['Page Name'] || r.page_name || '').trim(),
-          'Budget': budget,
-          'Spent': spent,
-          'Remaining': remaining,
-          _recordId: r._recordId || cleanId || crypto.randomUUID()
-        };
-        await updateRowAt('Pause_ADS', PAUSE_ADS_HEADERS, r._row, updated, id);
-        invalidateSheetCache('Pause_ADS');
-        if (Array.isArray(memoryStore.pauseAds)) {
-          const idx = memoryStore.pauseAds.findIndex(x => 
-            (cleanId && (String(x._recordId) === cleanId || String(x._row) === cleanId)) ||
-            (originalSl && String(x['SL NO'] || x.sl_no || '').trim() === originalSl) ||
-            (String(x['SL NO'] || x.sl_no || '').trim() === String(r['SL NO'] || r.sl_no || '').trim())
-          );
-          if (idx >= 0) memoryStore.pauseAds[idx] = { ...memoryStore.pauseAds[idx], ...updated };
-          else memoryStore.pauseAds.push(updated);
-        }
-        saveStoreToDisk();
-        return { success: true, record: updated };
-      }
-      if (Array.isArray(memoryStore.pauseAds) && memoryStore.pauseAds.length) {
-        const idx = memoryStore.pauseAds.findIndex(x =>
-          (cleanId && (String(x._recordId) === cleanId || String(x._row) === cleanId)) ||
-          (originalSl && String(x['SL NO'] || x.sl_no || '').trim() === originalSl) ||
-          (targetSl && String(x['SL NO'] || x.sl_no || '').trim() === targetSl)
-        );
-        if (idx >= 0) {
-          const ex = memoryStore.pauseAds[idx];
-          const budget = Number(d.Budget ?? d.budget ?? ex.Budget ?? ex['Budget'] ?? 0);
-          const spent = Number(d.Spent ?? d.spent ?? ex.Spent ?? ex['Spent'] ?? 0);
-          const updated = {
-            ...ex,
-            ...d,
-            'Date': d.Date || d.date || ex.Date || ex['Date'],
-            'SL NO': String(d['SL NO'] || d.sl_no || ex['SL NO'] || '').trim(),
-            'Page Name': String(d['Page Name'] || d.page_name || ex['Page Name'] || '').trim(),
-            'Budget': budget,
-            'Spent': spent,
-            'Remaining': +(budget - spent).toFixed(2),
-            _recordId: ex._recordId || cleanId || crypto.randomUUID()
-          };
-          memoryStore.pauseAds[idx] = updated;
-          saveStoreToDisk();
-          return { success: true, record: updated };
-        }
-      }
-      return { success: false, message: 'Pause Ads record not found' };
-    }
-    case 'deletePauseAds': {
-      requireAdmin(req);
-      const [id, clientRow] = args;
-      const cleanId = String(id || clientRow?._recordId || clientRow?.['Record ID'] || '').trim();
-      const targetSl = String(clientRow?.['SL NO'] || clientRow?.sl_no || clientRow?.SL || (Number(cleanId) ? cleanId : '')).replace(/^#/, '').trim();
-      const rows = await readRows('Pause_ADS', PAUSE_ADS_HEADERS);
-      const isMatch = (x: any) => {
-        if (!x) return false;
-        if (cleanId && (String(x._recordId || '').trim() === cleanId || String(x['Record ID'] || '').trim() === cleanId || String(x._row) === cleanId)) return true;
-        if (targetSl) {
-          const xSl = String(x['SL NO'] || x.sl_no || x.SL || '').replace(/^#/, '').trim();
-          if (xSl && (xSl === targetSl || xSl.padStart(3, '0') === targetSl.padStart(3, '0'))) return true;
-        }
-        if (clientRow && clientRow['Page Name'] && x['Page Name']) {
-          const cp = String(clientRow['Page Name']).trim().toLowerCase();
-          const xp = String(x['Page Name']).trim().toLowerCase();
-          if (cp === xp && targetSl) return true;
-        }
-        return false;
-      };
-
-      const r = rows.find(isMatch) || (Array.isArray(memoryStore.pauseAds) ? memoryStore.pauseAds.find(isMatch) : null) || clientRow;
-      const matchInfo = {
-        'Record ID': cleanId || r?.['Record ID'] || r?._recordId,
-        'SL NO': r?.['SL NO'] || targetSl,
-        SL: r?.['SL NO'] || targetSl,
-        'Page Name': r?.['Page Name'] || clientRow?.['Page Name']
-      };
-
-      await deleteRowAt('Pause_ADS', r?._row, cleanId, matchInfo);
-      invalidateSheetCache('Pause_ADS');
-      if (Array.isArray(memoryStore.pauseAds)) {
-        memoryStore.pauseAds = memoryStore.pauseAds.filter(x => !isMatch(x));
       }
       saveStoreToDisk();
       return { success: true };
@@ -6608,10 +5920,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
 
       const allCosts = memoryStore.agencyCosts;
       const totalAgencyCost = allCosts.reduce((s, r) => s + (Number(r['Cost']) || 0), 0);
-      const allScams = memoryStore.scams;
-      const totalScamLoss = allScams.reduce((s, r) => s + (Number(r['Taka']) || 0), 0);
-
-      const netProfit = Math.max(0, totalTaka - totalAgencyCost - totalScamLoss);
+      const netProfit = Math.max(0, totalTaka - totalAgencyCost);
       const profitMargin = totalTaka > 0 ? ((netProfit / totalTaka) * 100).toFixed(1) : '0.0';
 
       const monthlySpendMap: { [m: string]: number } = {};
@@ -6652,7 +5961,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           totalPaymentsReceived: totalPaid,
           outstandingDue: totalDue,
           totalAgencyCost,
-          totalScamLoss,
           netProfit,
           profitMargin,
           monthlyTrend: MONTHS.map(m => ({ month: m, spend: monthlySpendMap[m] || 0 })),
@@ -6666,7 +5974,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           totalPaid,
           totalDue,
           totalAgencyCost,
-          totalScamLoss,
           netProfit,
           profitMargin
         },
@@ -6706,16 +6013,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       });
       const totalCost = monthlyCosts.reduce((s, r) => s + (Number(r['Cost']) || 0), 0);
 
-      const scams = (await readRows('Scam', SCAM_HEADERS)).filter(isValidScamRow);
-      const monthlyScams = scams.filter(r => {
-        const dObj = parseAnyDate(r['Date']);
-        const rMonth = (r.Month || r['Month']) ? String(r.Month || r['Month']).trim() : (dObj ? MONTHS[dObj.getMonth()] : '');
-        const rYear = (r.Year || r['Year']) ? String(r.Year || r['Year']).trim() : (dObj ? String(dObj.getFullYear()) : '');
-        return String(rMonth).toLowerCase() === String(mn).toLowerCase() && String(rYear) === String(yr);
-      });
-      const scamTotal = monthlyScams.reduce((s, r) => s + (Number(r['Taka']) || 0), 0);
-      const scamShare = +(scamTotal / 2).toFixed(2);
-
       const totalDue = Math.round((totalTaka - totalPaid) * 100) / 100;
 
       let agencyAdsCost = 0, officeRent = 0;
@@ -6727,7 +6024,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       });
       const agencyAdsShare = Math.round((agencyAdsCost / 2) * 100) / 100;
       const officeRentShare = Math.round((officeRent / 2) * 100) / 100;
-      const finalDue = Math.round((totalDue + scamShare + agencyAdsShare - officeRentShare) * 100) / 100;
+      const finalDue = Math.round((totalDue + agencyAdsShare - officeRentShare) * 100) / 100;
 
       return {
         success: true,
@@ -6739,8 +6036,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         totalPaid,
         totalDue,
         totalCost,
-        scamCost: scamTotal,
-        scamPerPersonCost: scamShare,
         agencyAdsCost,
         agencyAdsShare,
         officeRent,
@@ -6750,7 +6045,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         costRows: monthlyCosts.map(c => ({ type: c.Type || c.type, cost: Number(c.Cost || c.cost || 0), status: c.Status || c.status || 'Due' })),
         paymentRows: monthlyPayments.map(p => ({ date: p.Date, method: p['Payment Method'] || 'Bkash', amount: Number(p['Paid (৳)'] || 0) })),
         campaignRows: campaigns.map(c => ({ sl: c.SL || c.sl_no || '', page: c['Page Name'] || '', start: c['Start'] || '', end: c['End'] || '', types: c['Types'] || 'Boost', day: c['Day'] || 1, budget: Number(c['Budget'] || 0), taka: Number(c['Taka'] || 0), adAccount: c['AD Account'] || '' })),
-        scamRows: monthlyScams.map(s => ({ date: s.Date || '', sl: s['SL NO'] || '', page: s['Page Name'] || '', spent: Number(s['Spent'] || 0), taka: Number(s['Taka'] || 0), perPerson: Number(s['Per Person Taka'] || 0) })),
         currentMonth: mn,
         currentYear: yr
       };
@@ -6767,9 +6061,8 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       });
       const agencyAdsShare = agencyAdsCost / 2;
       const officeRentShare = officeRent / 2;
-      const scamShare = Number(calc.scamPerPersonCost || 0);
       const monthlyDue = Number(calc.totalDue || 0);
-      const finalDue = monthlyDue + scamShare + agencyAdsShare - officeRentShare;
+      const finalDue = monthlyDue + agencyAdsShare - officeRentShare;
 
       return {
         success: true,
@@ -6778,8 +6071,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         totalAdvertisingSpent: Number(calc.totalBudget || 0),
         agencyAdsCost,
         agencyAdsShare,
-        scamTotal: Number(calc.scamCost || 0),
-        scamShare,
         officeRent,
         officeRentShare,
         monthlyDue,
@@ -6878,8 +6169,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         memoryStore.pages = [];
         memoryStore.adAccounts = [];
         memoryStore.agencyCosts = [];
-        memoryStore.scams = [];
-        memoryStore.pauseAds = [];
         sheetReadCache.clear();
       }
       saveStoreToDisk();
@@ -6940,28 +6229,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       // 5. Ad Accounts
       if (memoryStore.adAccounts.length > 0) {
         data['Ad Accounts'] = [['Ad Account', 'ID Name'], ...memoryStore.adAccounts.map(a => [a.a, a.id || ''])];
-      }
-
-      // 6. Scam
-      if (memoryStore.scams.length > 0) {
-        data['Scam'] = [SCAM_HEADERS, ...memoryStore.scams.map(r => SCAM_HEADERS.map(h => {
-          const v = r[h] ?? '';
-          if (isDateHeader(h)) {
-            return v ? formatCustomDate(v, r['Month']) : '';
-          }
-          return v;
-        }))];
-      }
-
-      // 7. Pause ADS
-      if (memoryStore.pauseAds.length > 0) {
-        data['Pause_ADS'] = [PAUSE_ADS_HEADERS, ...memoryStore.pauseAds.map(r => PAUSE_ADS_HEADERS.map(h => {
-          const v = r[h] ?? '';
-          if (isDateHeader(h)) {
-            return v ? formatCustomDate(v, r['Month']) : '';
-          }
-          return v;
-        }))];
       }
 
       // 8. Agency Cost
@@ -7123,8 +6390,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           memoryStore.pages = [];
           memoryStore.adAccounts = [];
           memoryStore.agencyCosts = [];
-          memoryStore.scams = [];
-          memoryStore.pauseAds = [];
           sheetReadCache.clear();
         }
       }
@@ -7336,7 +6601,7 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           // Memory not yet synced: try all month tabs for the current year (GViz ghost dedupe drops the missing ones)
           MONTHS.forEach(m => candidates.push(`Campaign_${m}_${new Date().getFullYear()}`));
         }
-        ['Payments', 'Pause_ADS', 'Scam', 'Agency_Cost', 'End_ADS'].forEach(n => { if (!candidates.includes(n)) candidates.push(n); });
+        ['Payments', 'Agency_Cost', 'End_ADS'].forEach(n => { if (!candidates.includes(n)) candidates.push(n); });
         const seen = new Set<string>();
         const pushData: Record<string, string[][]> = {};
         const perTab: Array<{ tab: string; cells: number; rows: number }> = [];
@@ -7530,8 +6795,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       memoryStore.campaigns = {};
       memoryStore.todayCreated = [];
       memoryStore.payments = [];
-      memoryStore.pauseAds = [];
-      memoryStore.scams = [];
       memoryStore.agencyCosts = [];
       memoryStore.monthlyClosing = [];
       memoryStore.pages = [];
@@ -7550,8 +6813,6 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       memoryStore.campaigns = {};
       memoryStore.todayCreated = [];
       memoryStore.payments = [];
-      memoryStore.pauseAds = [];
-      memoryStore.scams = [];
       memoryStore.agencyCosts = [];
       memoryStore.monthlyClosing = [];
       memoryStore.pages = [];

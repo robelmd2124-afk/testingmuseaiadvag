@@ -745,7 +745,7 @@ function restoreLocalAppSnapshot() {
     const snapshot = JSON.parse(raw);
     if (!snapshot) return true;
 
-    // Strict canonical order: Today Created, End Ads, Pause ADS, All Campaign, Page Summary, Payment, Agency Calculation, Ad Account Billing
+    // Strict canonical order: Today Created, End Ads, All Campaign, Page Summary, Payment, Agency Calculation, Ad Account Billing
     state.menus = getStandardMenus();
     state.months = snapshot.months || [];
     state.adAccounts = snapshot.adAccounts || [];
@@ -3147,7 +3147,7 @@ function populateAgencyCalcFilters() {
 }
 
 function selectMenu(key) {
-  if (key === 'design_studio' || key === 'auto_creative' || key === 'new_pages' || key === 'pause_ads' || key === 'scam' || key === 'ad_account_billing') {
+  if (key === 'design_studio' || key === 'auto_creative' || key === 'ad_account_billing') {
     selectMenu('today_created_campaign');
     return;
   }
@@ -3162,7 +3162,6 @@ function selectMenu(key) {
   const isCampaign = key === 'campaign';
   const isEndAds = key === 'end_ads';
   const isPageSummary = key === 'page_summery';
-  const isPauseAds = key === 'new_pages';
   const isAgencySpending = key === 'agency_spending';
   const isPayment = key === 'payment_due_tracker';
   const isAdBilling = key === 'ad_account_billing';
@@ -3177,7 +3176,6 @@ function selectMenu(key) {
     if (isToday) pageSubEl.textContent = 'Real-time daily ad campaign records & performance';
     else if (isCampaign) pageSubEl.textContent = 'All active and completed monthly campaign records & performance';
     else if (isEndAds) pageSubEl.textContent = 'Ending Today, Ending Tomorrow and All Ended Ads';
-    else if (isPauseAds) pageSubEl.textContent = 'Pause ADS Records & Remaining Budget Tracking';
     else if (isPageSummary) pageSubEl.textContent = 'Page-wise Total Campaigns & Budget Summary';
     else if (isPayment) pageSubEl.textContent = canEdit ? 'Client Payment Entry & Payment Collection Records (Full Access)' : 'Client Payment Collection Records (View Only)';
     else if (isAgencySpending) pageSubEl.textContent = 'Official Financial Statement & Monthly Closing Calculation';
@@ -3618,13 +3616,6 @@ function renderStats(d) {
       { id: 'stat_ps_budget', icon: 'paid', label: 'Total Budget ($)', rawNum: d.totalBudget, prefix: '$', sub: 'Cumulative', theme: 'stat-green' },
       { id: 'stat_ps_new', icon: 'fiber_new', label: 'New Pages', rawNum: d.newPages, prefix: '', sub: '$' + fmtNum(d.newBudget), theme: 'stat-amber' },
       { id: 'stat_ps_old', icon: 'history', label: 'Old Pages', rawNum: d.oldPages, prefix: '', sub: '$' + fmtNum(d.oldBudget), theme: 'stat-purple' }
-    ];
-  } else if (key === 'new_pages') {
-    cards = [
-      { id: 'stat_np_rec', icon: 'pause_circle', label: 'Paused Records', rawNum: d.totalRecords, prefix: '', sub: 'This Month', theme: 'stat-purple' },
-      { id: 'stat_np_bud', icon: 'paid', label: 'Total Budget', rawNum: d.totalBudget, prefix: '$', sub: 'Original Budget', theme: 'stat-blue' },
-      { id: 'stat_np_spent', icon: 'money_off', label: 'Total Spent', rawNum: d.totalSpent, prefix: '$', sub: 'Actual Spend', theme: 'stat-amber' },
-      { id: 'stat_np_rem', icon: 'account_balance_wallet', label: 'Remaining', rawNum: d.totalRemaining, prefix: '$', sub: 'Unused Balance', theme: 'stat-green' }
     ];
   } else if (key === 'agency_spending') {
     cards = [
@@ -5445,7 +5436,7 @@ function renderAgencyCalculationView(calcData) {
                       <span>FINAL DUE TO SETTLE</span>
                     </div>
                     <div style="font-size:11.5px;color:#7F1D1D;font-weight:500;margin-top:2px;margin-left:28px">
-                      (Total Due + Ads Cost + Scam + Others) − Office Rent
+                      (Total Due + Ads Cost + Others) − Office Rent
                     </div>
                   </td>
                   <td style="padding:18px 22px;text-align:right">
@@ -8232,17 +8223,6 @@ async function saveEntry() {
       data.year = String(parsedD.getFullYear());
       data.Month = data.month;
       data.Year = data.year;
-    } else if (currentKey === 'new_pages' || currentKey === 'scam') {
-      const dateVal = data.date || todayStr;
-      const parsedD = parseAnyDate(dateVal) || getNowBST();
-      const formattedD = formatCustomDate(parsedD);
-      data.date = formattedD;
-      data.Date = formattedD;
-      data.month = MONTHS[parsedD.getMonth()];
-      data.year = String(parsedD.getFullYear());
-      data.Month = data.month;
-      data.Year = data.year;
-      data.Entry = todayStr;
     } else {
       const startParsedForMonth = parseAnyDate(data.start_date || todayStr) || getNowBST();
       const formattedStartDate = formatCustomDate(startParsedForMonth);
@@ -8552,17 +8532,13 @@ async function saveEntry() {
       return;
     }
 
-    // Non-campaign forms (Pause Ads, Scam, Agency Cost)
+    // Non-campaign form (Agency Cost)
     saveEntryToVault([data], 'saved');
     resetEntryForm();
     showToast('⚡ Entry saved successfully! ✅', 'success');
 
     // Instantly sync non-campaign entry to Google Sheet
-    if (currentKey === 'new_pages') {
-      autoSyncDirectToGoogleSheets('Pause_ADS', PAUSE_ADS_HEADERS, [data]).catch(() => {});
-    } else if (currentKey === 'scam') {
-      autoSyncDirectToGoogleSheets('Scam', SCAM_HEADERS, [data]).catch(() => {});
-    } else if (currentKey === 'agency_cost') {
+    if (currentKey === 'agency_cost') {
       autoSyncDirectToGoogleSheets('Agency_Cost', AGENCY_COST_HEADERS, [data]).catch(() => {});
     }
 
@@ -8570,11 +8546,7 @@ async function saveEntry() {
       try {
         data.pin = localStorage.getItem('adverse_saved_pin') || '01726912624';
         let res;
-        if (currentKey === 'new_pages') {
-          res = await cloudRpc('addPauseAds', [data]);
-        } else if (currentKey === 'scam') {
-          res = await cloudRpc('addScam', [data]);
-        } else if (currentKey === 'agency_cost') {
+        if (currentKey === 'agency_cost') {
           res = await cloudRpc('addAgencyCost', [data]);
         }
         if (res && res.success) {
@@ -8586,7 +8558,7 @@ async function saveEntry() {
       } catch (e) {
         console.warn('Background sync note:', e);
         enqueueOfflineSync({
-          type: currentKey === 'new_pages' ? 'pause_ads' : (currentKey === 'scam' ? 'scam' : 'agency_cost'),
+          type: 'agency_cost',
           data,
           timestamp: Date.now()
         });
@@ -9302,11 +9274,7 @@ async function deleteRecordItem(id, row) {
 
   if (oauthToken && sheetId) {
     try {
-      if (key === 'new_pages') {
-        deleteRowFromSheetDirect(sheetId, 'Pause_ADS', id, sl, extraMatch).catch(() => {});
-      } else if (key === 'scam') {
-        deleteRowFromSheetDirect(sheetId, 'Scam', id, sl, extraMatch).catch(() => {});
-      } else if (key === 'agency_cost') {
+      if (key === 'agency_cost') {
         deleteRowFromSheetDirect(sheetId, 'Agency_Cost', id, sl, extraMatch).catch(() => {});
       } else if (key === 'payment_due_tracker' || key === 'payments') {
         deleteRowFromSheetDirect(sheetId, `Payments_${resolvedMonth}_${resolvedYear}`, id, sl, extraMatch).catch(() => {});
@@ -9328,9 +9296,7 @@ async function deleteRecordItem(id, row) {
   // Webhook instant deletion
   if (webhookUrl) {
     const targetWebhookTabs = [];
-    if (key === 'new_pages') targetWebhookTabs.push('Pause_ADS');
-    else if (key === 'scam') targetWebhookTabs.push('Scam');
-    else if (key === 'agency_cost') targetWebhookTabs.push('Agency_Cost');
+    if (key === 'agency_cost') targetWebhookTabs.push('Agency_Cost');
     else if (key === 'payment_due_tracker' || key === 'payments') targetWebhookTabs.push(`Payments_${resolvedMonth}_${resolvedYear}`);
     else {
       targetWebhookTabs.push(`Campaign_${resolvedMonth}_${resolvedYear}`);
@@ -9377,12 +9343,6 @@ async function deleteRecordItem(id, row) {
   if (key === 'campaign' || key === 'today_created_campaign' || key === 'today_created') {
     google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
       .deleteCampaignRecord(id, month, year, row);
-  } else if (key === 'new_pages') {
-    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
-      .deletePauseAds(id, row);
-  } else if (key === 'scam') {
-    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
-      .deleteScam(id, row);
   } else if (key === 'agency_cost') {
     google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
       .deleteAgencyCost(id, row);
@@ -9882,19 +9842,6 @@ async function saveModalRecord() {
   const saveBtn = document.getElementById('btnSaveRecord');
 
   const merged = { ...(state.editingRow || {}), ...data };
-  if (key === 'new_pages') {
-    const b = parseFloat(merged.Budget ?? merged.budget ?? 0) || 0;
-    const s = parseFloat(merged.Spent ?? merged.spent ?? 0) || 0;
-    if (b <= 0) {
-      showToast('❌ Budget must be greater than $0!', 'error');
-      return;
-    }
-    merged.Remaining = +(b - s).toFixed(2);
-    data.Budget = b;
-    data.Spent = s;
-    data.Remaining = merged.Remaining;
-    data.originalSl = originalRow['SL NO'] || originalRow.sl_no;
-  }
   const targetId = state.editingId;
   const sl = merged.SL || merged['SL'];
   const extraMatch = {
@@ -9908,12 +9855,6 @@ async function saveModalRecord() {
   const isRowMatch = r => {
     if (r === originalRow) return true;
     if (targetId && (r['Record ID'] === targetId || r._recordId === targetId || String(r._row) === String(targetId))) return true;
-    if (key === 'new_pages') {
-      const origSl = originalRow['SL NO'] || originalRow.sl_no;
-      if (origSl && String(r['SL NO'] || r.sl_no || '').trim() === String(origSl).trim()) return true;
-      const slMatch = (r['SL NO'] || r.sl_no) && (merged['SL NO'] || merged.sl_no || targetId);
-      if (slMatch && String(r['SL NO'] || r.sl_no).trim() === String(merged['SL NO'] || merged.sl_no || targetId).trim()) return true;
-    }
     const rSl = String(r.SL || r['SL'] || r['SL NO'] || r.sl || r.sl_no || '').trim();
     const mSl = String(merged.SL || merged['SL'] || '').trim();
     if (mSl && rSl) {
@@ -9963,11 +9904,7 @@ async function saveModalRecord() {
   if (!sheetId && state.sheetId) sheetId = state.sheetId;
 
   let targetTabs = [];
-  if (key === 'new_pages') {
-    targetTabs.push({ name: 'Pause_ADS', headers: PAUSE_ADS_HEADERS });
-  } else if (key === 'scam') {
-    targetTabs.push({ name: 'Scam', headers: SCAM_HEADERS });
-  } else if (key === 'agency_cost') {
+  if (key === 'agency_cost') {
     targetTabs.push({ name: 'Agency_Cost', headers: AGENCY_COST_HEADERS });
   } else if (key === 'agency_spending' || key === 'payment_due_tracker' || key === 'payments') {
     targetTabs.push({ name: 'Payments', headers: PAYMENT_HEADERS });
@@ -10035,13 +9972,7 @@ async function saveModalRecord() {
     loadMenuData();
   };
 
-  if (key === 'new_pages') {
-    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
-      .updatePauseAds(state.editingId, data);
-  } else if (key === 'scam') {
-    google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
-      .updateScam(state.editingId, data);
-  } else if (key === 'agency_cost') {
+  if (key === 'agency_cost') {
     google.script.run.withSuccessHandler(callback).withFailureHandler(errorHandler)
       .updateAgencyCost(state.editingId, data);
   } else if (key === 'agency_spending' || key === 'payment_due_tracker') {
@@ -10515,12 +10446,8 @@ async function disconnectGoogleSheet(force = false) {
     state.campaigns = {};
     state.payments = [];
     state.currentPaymentRows = [];
-    state.scams = [];
-    state.currentScamRows = [];
     state.agencyCosts = [];
     state.currentAgencyCostRows = [];
-    state.pauseAds = [];
-    state.currentPauseAdsRows = [];
     state.monthlyClosing = [];
     state.currentMonthlyClosingRows = [];
     state.adAccounts = [];
@@ -10982,9 +10909,7 @@ function clearAllDatabaseData() {
       state.adAccounts = [];
       state.todayCreated = [];
       state.payments = [];
-      state.scams = [];
       state.agencyCosts = [];
-      state.pauseAds = [];
       state.monthlyClosing = [];
       
       updateHeaderSheetStatus(false);
@@ -13777,35 +13702,6 @@ window.selectMenuMobile = function(key) {
   if (typeof window.selectMenu === 'function') window.selectMenu(key);
 };
 
-state.activeAgencyTab = state.activeAgencyTab || 'scam';
-
-function switchAgencyCostTab(tab) {
-  state.activeAgencyTab = tab;
-  renderRecordsTable({ headers: state.headers, rows: state.rawRecords, scamRows: state.scamRows });
-}
-
-function submitScamEntryForm() {
-  const date = document.getElementById('scamDateInput')?.value;
-  const pageName = document.getElementById('scamPageInput')?.value;
-  const budget = parseFloat(document.getElementById('scamBudgetInput')?.value || 0);
-  const taka = parseFloat(document.getElementById('scamTakaInput')?.value || 0);
-
-  if (!date || !pageName || budget <= 0 || taka <= 0) {
-    showToast('⚠️ Please fill in all fields correctly', 'error');
-    return;
-  }
-
-  const formattedDate = formatCustomDate(date) || date;
-
-  google.script.run.withSuccessHandler(res => {
-    if (res && res.success) {
-      showToast('🛡️ Scam entry saved successfully!', 'success');
-      loadMenuData(true);
-    } else {
-      showToast(res?.message || 'Failed to save scam entry', 'error');
-    }
-  }).addScam({ date: formattedDate, page_name: pageName, spent: budget, taka });
-}
 
 function submitAgencyCostForm() {
   const date = document.getElementById('costDateInput')?.value;
@@ -13830,18 +13726,6 @@ function submitAgencyCostForm() {
   }).saveAgencyCost({ date: formattedDate, type, cost: taka, status });
 }
 
-function deleteScamRecord(id) {
-  if (!confirm('Are you sure you want to delete this scam entry?')) return;
-  google.script.run.withSuccessHandler(res => {
-    if (res && res.success) {
-      showToast('Scam entry deleted', 'success');
-      loadMenuData(true);
-    } else {
-      showToast('Failed to delete', 'error');
-    }
-  }).deleteScam(id);
-}
-
 function deleteAgencyCostRecord(id) {
   if (!confirm('Are you sure you want to delete this agency cost entry?')) return;
   google.script.run.withSuccessHandler(res => {
@@ -13854,10 +13738,7 @@ function deleteAgencyCostRecord(id) {
   }).deleteAgencyCost(id);
 }
 
-window.switchAgencyCostTab = switchAgencyCostTab;
-window.submitScamEntryForm = submitScamEntryForm;
 window.submitAgencyCostForm = submitAgencyCostForm;
-window.deleteScamRecord = deleteScamRecord;
 window.deleteAgencyCostRecord = deleteAgencyCostRecord;
 window.downloadCalculationImage = downloadCalculationImage;
 

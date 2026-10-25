@@ -653,7 +653,7 @@ function findRowIndexInValues(values: any[][], criteria: DirectMatchCriteria): n
       }
     }
 
-    // 4. Match by Date + Paid / Cost / Spent (specifically for Payments, Agency Costs, Scams)
+    // 4. Match by Date + Paid / Cost / Spent (specifically for Payments, Agency Costs)
     if (cleanDate && rDate && (cleanDate === rDate || cleanDate.includes(rDate) || rDate.includes(cleanDate))) {
       if (!isNaN(cleanPaid) && !isNaN(rBudget) && Math.abs(cleanPaid - rBudget) < 0.01) {
         return i;
