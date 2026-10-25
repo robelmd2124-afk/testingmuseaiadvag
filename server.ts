@@ -7796,20 +7796,61 @@ async function startServer() {
     });
   }
 
+  // Startup guards (2026-10-25): background failures must never kill the
+  // server process — a dead server shows up in the app as 0 data. These
+  // only log and continue; every sync path already catches its own errors,
+  // this is the last resort so one stray rejection cannot take the app down.
+  if (!(globalThis as any).__adverseStartupGuards) {
+    (globalThis as any).__adverseStartupGuards = true;
+    process.on('uncaughtException', (err: any) => {
+      console.error('[AdVerse Server Guard]: uncaughtException (server kept alive):', err?.message || err);
+    });
+    process.on('unhandledRejection', (reason: any) => {
+      console.error('[AdVerse Server Guard]: unhandledRejection (server kept alive):', (reason as any)?.message || reason);
+    });
+  }
+
   const listenPort = getListenPort();
-  const server = app.listen(listenPort, '0.0.0.0', () => {
-    console.log(`AdVerse Agency running on http://0.0.0.0:${listenPort} (mode: ${isProduction ? 'production' : 'development'})`);
-    // Automatic Immediate Background Sync on Server Startup
-    if (SHEET_ID) {
-      setTimeout(() => {
-        syncAllSpreadsheetData().then(res => {
-          console.log('[AdVerse Background Sync]: Initial startup sync completed:', res?.message || 'Done');
-        }).catch(err => {
-          console.log('[AdVerse Background Sync Notice]: Initial sync notice:', err?.message);
-        });
-      }, 500);
-    }
-  });
+  let activeServer: any = null;
+  let listenAttempts = 0;
+  const startListening = () => {
+    // NOTE: do NOT pass a callback to app.listen — Express 5 registers the
+    // callback as a one-time 'error' handler too, so on a failed bind it
+    // fires anyway ("running on" + a startup sync for a server that never
+    // bound). The server's own 'listening' event fires only on a real bind.
+    // Local `server` (not the shared activeServer) so each attempt's
+    // handlers close and retry only their own server object.
+    const server = app.listen(listenPort, '0.0.0.0');
+    activeServer = server;
+    server.once('listening', () => {
+      console.log(`AdVerse Agency running on http://0.0.0.0:${listenPort} (mode: ${isProduction ? 'production' : 'development'})`);
+      // Automatic Immediate Background Sync on Server Startup
+      if (SHEET_ID) {
+        setTimeout(() => {
+          syncAllSpreadsheetData().then(res => {
+            console.log('[AdVerse Background Sync]: Initial startup sync completed:', res?.message || 'Done');
+          }).catch(err => {
+            console.log('[AdVerse Background Sync Notice]: Initial sync notice:', err?.message);
+          });
+        }, 500);
+      }
+    });
+    server.on('error', (err: any) => {
+      // Port still held by a previous instance shutting down (rapid restart
+      // in AI Studio): retry briefly instead of dying — if the port never
+      // binds, the import health check fails and the app never comes up.
+      if (err && err.code === 'EADDRINUSE' && listenAttempts < 5) {
+        listenAttempts++;
+        const delay = 1000 * listenAttempts;
+        console.warn(`[AdVerse Server]: Port ${listenPort} busy, retry ${listenAttempts}/5 in ${delay}ms...`);
+        try { server.close(); } catch (_) {}
+        setTimeout(startListening, delay);
+        return;
+      }
+      console.error('[AdVerse Server Listen Error]:', err);
+    });
+  };
+  startListening();
 
   // Periodic background Google Sheet sync (Every 5 minutes to stay within Google quota & prevent IP throttling)
   setInterval(async () => {
@@ -7829,23 +7870,24 @@ async function startServer() {
     }
   }, 240000);
 
-  server.on('error', (err: any) => {
-    console.error('[AdVerse Server Listen Error]:', err);
-  });
-
-  process.on('SIGTERM', () => {
-    console.log('[AdVerse Server]: Received SIGTERM, closing gracefully...');
-    server.close(() => {
+  const shutdown = (signal: string) => {
+    console.log(`[AdVerse Server]: Received ${signal}, closing gracefully...`);
+    // closeAllConnections drops keep-alive sockets so close() cannot hang
+    // (a hanging close keeps the port held, which is what forces the next
+    // start into EADDRINUSE). Force-exit fallback so shutdown always ends.
+    const forceExit = setTimeout(() => process.exit(0), 5000);
+    (forceExit as any).unref?.();
+    if (activeServer) {
+      try { activeServer.closeAllConnections?.(); } catch (_) {}
+      activeServer.close(() => {
+        process.exit(0);
+      });
+    } else {
       process.exit(0);
-    });
-  });
-
-  process.on('SIGINT', () => {
-    console.log('[AdVerse Server]: Received SIGINT, closing gracefully...');
-    server.close(() => {
-      process.exit(0);
-    });
-  });
+    }
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch(err => {
