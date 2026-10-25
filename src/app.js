@@ -8040,6 +8040,25 @@ function saveEntryToVault(records, status = 'saved') {
 }
 window.saveEntryToVault = saveEntryToVault;
 
+// Vault re-sync safety: after the server confirms an entry, the vault must
+// remember the SERVER's Record IDs (UUIDs), not the optimistic temp IDs.
+// A later vault re-sync sends the UUID, so the server recognises the entry
+// and reuses it instead of appending a second row. Temp IDs can never match
+// a server row, which is how a re-synced entry became a same-SL double.
+function replaceVaultItemsWithConfirmed(optimisticItems, confirmedRecords) {
+  try {
+    const optIds = new Set((optimisticItems || []).map(o => String(o['Record ID'] || o._recordId || '')));
+    const rawV = localStorage.getItem('adverse_entry_vault') || '[]';
+    let vaultArr = [];
+    try { vaultArr = JSON.parse(rawV); } catch (_) { vaultArr = []; }
+    if (Array.isArray(vaultArr)) {
+      vaultArr = vaultArr.filter(v => !optIds.has(String(v.id || '')) && !optIds.has(String(v.data?.['Record ID'] || v.data?._recordId || '')));
+      localStorage.setItem('adverse_entry_vault', JSON.stringify(vaultArr.slice(0, 100)));
+    }
+  } catch (_) {}
+  saveEntryToVault(confirmedRecords, 'confirmed');
+}
+
 function enqueueOfflineSync(task) {
   try {
     const raw = localStorage.getItem('adverse_offline_queue') || '[]';
@@ -8084,7 +8103,9 @@ async function processClientOfflineQueue() {
           res = await cloudRpc('addAgencyCost', [item.data]);
         }
         if (res && res.success) {
-          saveEntryToVault(item.optimisticItems || [item.data], 'confirmed');
+          const flushedConfirmed = (item.type === 'campaign') ? (res.records || (res.record ? [res.record] : [])) : [];
+          if (flushedConfirmed.length > 0) replaceVaultItemsWithConfirmed(item.optimisticItems || [item.data], flushedConfirmed);
+          else saveEntryToVault(item.optimisticItems || [item.data], 'confirmed');
         } else {
           remaining.push(item);
         }
@@ -8504,7 +8525,8 @@ async function saveEntry() {
             }
             state.clientCache = {};
             saveLocalAppSnapshot();
-            saveEntryToVault(optimisticItems, 'confirmed');
+            if (confirmedRecords.length > 0) replaceVaultItemsWithConfirmed(optimisticItems, confirmedRecords);
+            else saveEntryToVault(optimisticItems, 'confirmed');
           } else {
             console.warn('Server addCampaign unconfirmed:', res);
             enqueueOfflineSync({
@@ -13849,8 +13871,10 @@ async function reSyncAllVaultEntries() {
     if (item.data) {
       const d = item.data;
       const targetMonthTab = `Campaign_${d.Month || 'October'}_${d.Year || '2026'}`;
-      autoSyncDirectToGoogleSheets('Today_Created', TODAY_HEADERS, [d]).catch(() => {});
-      autoSyncDirectToGoogleSheets(targetMonthTab, CH, [d]).catch(() => {});
+      // Server-only: the old parallel direct browser-to-sheet write is what
+      // created same-SL doubles (temp row + server row). The server RPC is
+      // the only writer; it reuses the row when the Record ID matches and
+      // otherwise bumps past used SLs, so a re-sync can never repeat an SL.
       cloudRpc('addCampaign', [d]).catch(() => {});
     }
   }
@@ -13873,8 +13897,7 @@ function reSyncSingleVaultEntry(id) {
   if (found && found.data) {
     const d = found.data;
     const targetMonthTab = `Campaign_${d.Month || 'October'}_${d.Year || '2026'}`;
-    autoSyncDirectToGoogleSheets('Today_Created', TODAY_HEADERS, [d]);
-    autoSyncDirectToGoogleSheets(targetMonthTab, CH, [d]);
+    // Server-only (see reSyncAllVaultEntries): no direct sheet write here.
     cloudRpc('addCampaign', [d]).then(() => {
       showToast('✅ Entry synced successfully to Google Sheet & Server!', 'success');
       loadVaultEntriesIntoUI();
