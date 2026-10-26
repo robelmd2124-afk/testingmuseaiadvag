@@ -8312,10 +8312,13 @@ async function saveEntry() {
         const budget = Number(row.querySelector('.multi-campaign-budget')?.value) || 10;
         const rowType = row.querySelector('.multi-campaign-type')?.value || data.types || 'Boost';
         const rowSl = row.querySelector('.multi-campaign-sl')?.value ? String(row.querySelector('.multi-campaign-sl')?.value).replace(/\D/g, '') : '';
+        // Per-campaign start date: use this row's own START field, falling
+        // back to the main campaign's start date when it is left blank.
+        const rowStart = row.querySelector('.multi-campaign-start')?.value || data.start_date;
         batchItems.push({
           day,
           budget,
-          start_date: data.start_date,
+          start_date: rowStart,
           types: rowType,
           sl_no: rowSl || undefined,
           record_id: 'temp_' + batchStamp + '_' + (rowIdx + 1)
@@ -8343,7 +8346,9 @@ async function saveEntry() {
           const dVal = Number(bItem.day) || 1;
           const bVal = Number(bItem.budget) || 0;
           const tVal = bVal * rateVal;
-          const parsedS = parseAnyDate(startVal) || new Date();
+          // Per-campaign start date for the optimistic row, so a batch row
+          // with its own start date shows its own End and Month/Year.
+          const parsedS = parseAnyDate(bItem.start_date) || parseAnyDate(startVal) || new Date();
           const endD = new Date(parsedS.getFullYear(), parsedS.getMonth(), parsedS.getDate() + dVal);
           const endVal = formatCustomDate(endD);
           const itemMonth = MONTHS[parsedS.getMonth()];
@@ -8606,8 +8611,12 @@ function addMultipleCampaignRow() {
   // Inherit sensible default from main campaign if available
   const mainDayInput = document.querySelector('#entryForm [name="day"]');
   const mainBudInput = document.querySelector('#entryForm [name="budget"]');
+  const mainStartInput = document.querySelector('#entryForm [name="start_date"]');
   const initialDay = (mainDayInput && parseFloat(mainDayInput.value) > 0) ? mainDayInput.value : '2';
   const initialBud = (mainBudInput && parseFloat(mainBudInput.value) > 0) ? mainBudInput.value : '10';
+  // Per-campaign start date: defaults to the main campaign's start date,
+  // but each extra campaign row can pick its own start date afterwards.
+  const initialStart = (mainStartInput && mainStartInput.value) ? mainStartInput.value : '';
 
   const row = document.createElement('div');
   row.className = 'multi-campaign-row';
@@ -8647,6 +8656,11 @@ function addMultipleCampaignRow() {
     </div>
 
     <div class="multi-fields-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;width:100%;align-items:start">
+      <div class="form-field">
+        <label>START <span class="req">*</span></label>
+        <input type="date" class="multi-campaign-start" value="${initialStart}" required>
+      </div>
+
       <div class="form-field">
         <label>TYPES</label>
         <select class="multi-campaign-type">
@@ -8810,6 +8824,15 @@ function addMultipleCampaignRow() {
 
   typeEl?.addEventListener('change', () => {
     calcRow();
+    if (window.updateCampaignCalc) window.updateCampaignCalc();
+  });
+
+  const startEl = row.querySelector('.multi-campaign-start');
+  startEl?.addEventListener('change', () => {
+    calcRow();
+    if (window.updateCampaignCalc) window.updateCampaignCalc();
+  });
+  startEl?.addEventListener('input', () => {
     if (window.updateCampaignCalc) window.updateCampaignCalc();
   });
 
