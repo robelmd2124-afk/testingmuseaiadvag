@@ -4963,6 +4963,11 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
         // one that was already entered (covers sheet rows + rows assigned
         // earlier in this same batch).
         const usedSlBySheet = new Map<string, Set<number>>();
+        // Next serial per month tab, computed once per batch from the fresh
+        // live sheet (see below). This is the ONLY source of a new SL:
+        // a client-supplied SL is never trusted, so a stale form can no
+        // longer create an out-of-order SL like 10557 after 10563.
+        const nextSlBySheet = new Map<string, number>();
 
         for (let idx = 0; idx < list.length; idx++) {
           const item = list[idx];
@@ -4998,44 +5003,60 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
           } else {
             const targetMonthNum = MONTHS.findIndex(m => m.toLowerCase() === month.toLowerCase()) + 1;
             const targetPrefix = String(targetMonthNum).padStart(2, '0');
-            const itemSpecificSl = item.sl_no ? parseInt(String(item.sl_no).replace(/\D/g, ''), 10) : 0;
-            let sl = (itemSpecificSl && !isNaN(itemSpecificSl)) ? itemSpecificSl : (calculatedBaseSl + idx);
-            const slStr = String(sl);
-            if (!slStr.startsWith(targetPrefix) && !slStr.startsWith(String(targetMonthNum))) {
-              const properMonthSl = await nextSL(month, year);
-              sl = (parseInt(String(properMonthSl), 10) || 1001) + idx;
-            }
-            // Never reuse an SL that is already taken in this month — bump
-            // serial-wise past every used number, including this batch's own
-            // earlier items (so a batch whose rows all carry the same sl_no
-            // still lands on consecutive, unique SLs).
+            // SERIAL-BY-SERIAL SL (2026-10-27, Fast mobil chula case):
+            // The old rule was only "bump if the SL is already taken".
+            // That still allowed a stale client SL (e.g. 10557, from a form
+            // loaded before 10558-10563 existed) to land AFTER 10563 in
+            // the sheet - unique, but out of order - and it allowed a
+            // freed gap SL to be reused. Worse, when the fresh-sheet read
+            // failed it silently fell back to stale memory, so even the
+            // duplicate bump could miss. New rule, no exceptions for new
+            // entries: SL = (max SL actually in the live sheet for this
+            // month tab, or in memory if higher) + 1, consecutive within
+            // the batch. The client's sl_no is ignored for new rows.
+            // A retry of the same Record ID still reuses its original row
+            // (the existingRow branch above) - that is idempotency, not
+            // a new entry, so it is unaffected.
             let usedSl = usedSlBySheet.get(targetSheetEarly);
-            if (!usedSl) {
+            let nextSl = nextSlBySheet.get(targetSheetEarly);
+            if (usedSl === undefined || nextSl === undefined) {
               usedSl = new Set((memoryStore.campaigns[targetSheetEarly] || []).map((r: any) => parseInt(String(r['SL'] ?? '').replace(/\D/g, ''), 10)).filter((n: number) => n > 0));
-              // All-time unique serial SL: local memory can be stale when
-              // another side entered while this server was down, so also
-              // merge the SLs actually present in the live sheet right now.
-              // A client-supplied or stale next SL that is already in the
-              // sheet is then bumped below to the next free serial instead
-              // of ever being saved as a duplicate.
+              let freshMax = 0;
               if (SHEET_ID) {
-                try {
-                  const fresh = await fetchSheetCsvGviz(SHEET_ID, targetSheetEarly);
-                  if (fresh && Array.isArray(fresh.rows)) {
-                    const slCol = (fresh.headers || []).findIndex((h: any) => String(h || '').trim().toLowerCase() === 'sl');
-                    for (const rowArr of fresh.rows) {
-                      const n = parseInt(String(rowArr[slCol >= 0 ? slCol : 0] || '').replace(/\D/g, ''), 10);
-                      if (n > 0) usedSl.add(n);
+                let freshOk = false;
+                for (let attempt = 0; attempt < 3 && !freshOk; attempt++) {
+                  try {
+                    const fresh = await fetchSheetCsvGviz(SHEET_ID, targetSheetEarly);
+                    if (fresh && Array.isArray(fresh.rows) && fresh.rows.length > 0) {
+                      freshOk = true;
+                      const slCol = (fresh.headers || []).findIndex((h: any) => String(h || '').trim().toLowerCase() === 'sl');
+                      for (const rowArr of fresh.rows) {
+                        const n = parseInt(String(rowArr[slCol >= 0 ? slCol : 0] || '').replace(/\D/g, ''), 10);
+                        if (n > 0) {
+                          usedSl.add(n);
+                          if (n > freshMax) freshMax = n;
+                        }
+                      }
                     }
-                  }
-                } catch (_) {
-                  // Fresh-sheet read failed: fall back to memory only rather
-                  // than blocking the entry; the bump loop still applies.
+                  } catch (_) { /* retried below */ }
+                  if (!freshOk && attempt < 2) await new Promise(r => setTimeout(r, 1000));
+                }
+                if (!freshOk) {
+                  // Do NOT fall back to stale memory: assigning from stale
+                  // memory is exactly how an out-of-order / duplicate SL
+                  // gets created. Fail the entry honestly so the user can
+                  // retry once the sheet is readable again.
+                  throw new Error('Live sheet SL check failed - entry not saved. Sheet check kore abar try korun.');
                 }
               }
+              const memoryMax = usedSl.size ? Math.max(...usedSl) : 0;
+              const baseMax = Math.max(freshMax, memoryMax);
+              nextSl = baseMax > 0 ? baseMax + 1 : (parseInt(targetPrefix + '01', 10) || 1001);
               usedSlBySheet.set(targetSheetEarly, usedSl);
+              nextSlBySheet.set(targetSheetEarly, nextSl);
             }
-            while (usedSl.has(sl)) sl++;
+            const sl = nextSl;
+            nextSlBySheet.set(targetSheetEarly, nextSl + 1);
             usedSl.add(sl);
 
             row = normalizeCampaign({ ...d, ...item, 'Record ID': clientRecordId || undefined, _recordId: clientRecordId || undefined }, month, year, sl);
