@@ -5221,6 +5221,7 @@ function renderAgencyCalculationView(calcData) {
 
   const agencyAdsCost = savedOverrides.agencyAdsCost !== undefined ? savedOverrides.agencyAdsCost : (d.agencyAdsCost || 0);
   const othersCost = savedOverrides.othersCost !== undefined ? savedOverrides.othersCost : (d.othersCost || d.otherExpense || 0);
+  const othersCostNote = savedOverrides.othersCostNote !== undefined ? savedOverrides.othersCostNote : (d.othersCostNote || '');
   const officeRent = savedOverrides.officeRent !== undefined ? savedOverrides.officeRent : (d.officeRent || 0);
 
   // Calculation formula: (Total Due + Agency Ads Cost + Others Cost) - Office Rent
@@ -5235,6 +5236,7 @@ function renderAgencyCalculationView(calcData) {
     totalDue,
     agencyAdsCost,
     othersCost,
+    othersCostNote,
     officeRent,
     finalDue,
     month,
@@ -5259,15 +5261,6 @@ function renderAgencyCalculationView(calcData) {
           <button type="button" class="btn btn-primary" id="btnDownloadCalcImage" onclick="downloadCalculationImage()" style="font-size:12.5px;padding:7px 15px;gap:6px;font-weight:700;background:linear-gradient(135deg,#DC2626,#EF4444);border:none">
             <span class="ms" style="font-size:16px">photo_camera</span> Export Image
           </button>
-          <button type="button" class="btn btn-secondary" onclick="copyAgencyMonthClosingStatement()" style="font-size:12.5px;padding:7px 13px;gap:5px;font-weight:600">
-            <span class="ms" style="font-size:16px">content_copy</span> Copy Summary
-          </button>
-          <button type="button" class="btn btn-secondary" onclick="window.printAgencyMonthClosingStatement()" style="font-size:12.5px;padding:7px 11px;gap:4px" title="Print Statement">
-            <span class="ms" style="font-size:16px">print</span> Print
-          </button>
-          <button type="button" class="btn btn-secondary" onclick="loadMenuData(true)" style="font-size:12.5px;padding:7px 11px;gap:4px" title="Refresh Live Data">
-            <span class="ms" style="font-size:16px">refresh</span> Sync
-          </button>
         </div>
       </div>
 
@@ -5290,6 +5283,9 @@ function renderAgencyCalculationView(calcData) {
               <span style="display:inline-block;padding:5px 14px;background:rgba(239,68,68,0.2);color:#FEE2E2;font-weight:800;font-size:13.5px;border-radius:8px;border:1px solid rgba(239,68,68,0.35);letter-spacing:0.02em">
                 ${month} ${year}
               </span>
+              <div style="margin-top:6px">
+                <span style="display:inline-block;padding:3px 12px;background:#ffffff;color:#0B0F19;font-weight:900;font-size:12px;border-radius:8px;letter-spacing:0.12em">INVOICE</span>
+              </div>
               <div style="font-size:10.5px;color:#94A3B8;font-weight:600;margin-top:4px;letter-spacing:0.04em">OFFICIAL FINANCIAL LEDGER</div>
             </div>
           </div>
@@ -5390,7 +5386,7 @@ function renderAgencyCalculationView(calcData) {
                 </tr>
 
 
-                <!-- Others Cost (Clean Editable Input) -->
+                <!-- Others Cost (Clean Editable Input + Note) -->
                 <tr style="border-bottom:1px solid #F1F5F9">
                   <td style="padding:12px 22px;font-weight:600;color:#334155">
                     <div style="display:flex;align-items:center;gap:10px">
@@ -5399,6 +5395,9 @@ function renderAgencyCalculationView(calcData) {
                       </span>
                       <span>Others Cost</span>
                       <span style="font-size:11px;color:#0EA5E9;font-weight:700">(+)</span>
+                    </div>
+                    <div style="margin-top:8px">
+                      <input type="text" id="calcOthersCostNote" value="${escapeHtml(othersCostNote)}" placeholder="Note: kise kise cost gese likho (e.g. Internet bill, Transport, Office khoroch...)" oninput="window.recalcAgencyClosingStatement()" style="width:100%;height:32px;padding:0 10px;font-weight:500;font-size:12.5px;color:#334155;border:1px solid #CBD5E1;border-radius:8px;background:#F8FAFC;outline:none" onfocus="this.style.background='#fff';this.style.borderColor='#0EA5E9';this.style.boxShadow='0 0 0 3px rgba(14,165,233,0.12)'" onblur="this.style.background='#F8FAFC';this.style.borderColor='#CBD5E1';this.style.boxShadow='none'" />
                     </div>
                   </td>
                   <td style="padding:10px 22px;text-align:right">
@@ -5451,9 +5450,14 @@ function renderAgencyCalculationView(calcData) {
             </table>
           </div>
 
+          <!-- Others Cost Note (shows on the invoice when a note is written) -->
+          <div id="calcOthersCostNoteFooter" style="display:${othersCostNote ? 'block' : 'none'};background:#F0F9FF;border:1px solid #BAE6FD;border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#0C4A6E">
+            <span style="font-weight:800">📝 Others Cost Note: </span><span id="calcOthersCostNoteText">${escapeHtml(othersCostNote)}</span>
+          </div>
+
           <!-- Clean Footer Note -->
           <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#94A3B8;padding-top:4px">
-            <span>Generated Date: ${formatCustomDate(getNowBST())}</span>
+            <span>Invoice Period: ${month} ${year} • Generated Date: ${formatCustomDate(getNowBST())} • Currency: BDT (৳)</span>
             <span>AdVerse Agency • Executive Financial Statement</span>
           </div>
         </div>
@@ -5471,6 +5475,7 @@ window.recalcAgencyClosingStatement = function() {
   const adsVal = parseFloat(document.getElementById('calcAgencyAdsCost')?.value) || 0;
   const othersVal = parseFloat(document.getElementById('calcOthersCost')?.value) || 0;
   const rentVal = parseFloat(document.getElementById('calcOfficeRent')?.value) || 0;
+  const othersNoteVal = (document.getElementById('calcOthersCostNote')?.value || '').trim();
 
   // Formula: (Total Due + Agency Ads Cost + Others Cost) - Office Rent
   const finalDue = (totalDue + adsVal + othersVal) - rentVal;
@@ -5480,11 +5485,18 @@ window.recalcAgencyClosingStatement = function() {
     finalDueEl.textContent = `৳${fmtNum(finalDue)}`;
   }
 
+  // Others Cost note: show it in the invoice footer section live
+  const noteFooter = document.getElementById('calcOthersCostNoteFooter');
+  const noteText = document.getElementById('calcOthersCostNoteText');
+  if (noteFooter) noteFooter.style.display = othersNoteVal ? 'block' : 'none';
+  if (noteText) noteText.textContent = othersNoteVal;
+
   // Update currentStats
   state.currentStats = {
     ...state.currentStats,
     agencyAdsCost: adsVal,
     othersCost: othersVal,
+    othersCostNote: othersNoteVal,
     officeRent: rentVal,
     finalDue: finalDue
   };
@@ -5499,6 +5511,7 @@ window.recalcAgencyClosingStatement = function() {
     parsed[overrideKey] = {
       agencyAdsCost: adsVal,
       othersCost: othersVal,
+      othersCostNote: othersNoteVal,
       officeRent: rentVal,
       finalDue: finalDue
     };
@@ -5518,14 +5531,42 @@ window.downloadCalculationImage = async function() {
     btn.disabled = true;
     btn.innerHTML = '<span class="ms spin" style="font-size:16px">sync</span> Generating...';
   }
+  // Professional invoice capture: temporarily swap the editable inputs
+  // for plain static text, so the exported image looks like a real
+  // invoice (no empty input boxes), then restore the inputs afterwards.
+  const swapped = [];
+  const swapInputForText = (inputId, text, textStyle) => {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const span = document.createElement('span');
+    span.textContent = text;
+    span.style.cssText = textStyle;
+    input.style.display = 'none';
+    input.parentNode.insertBefore(span, input.nextSibling);
+    swapped.push({ input, span });
+  };
   try {
     const h2c = (typeof window !== 'undefined' && window.html2canvas) ? window.html2canvas : (typeof html2canvas !== 'undefined' ? html2canvas : null);
     if (!h2c) {
       showToast('html2canvas library is loading, please try again in a moment.', 'warning');
       return;
     }
+    const fmtAmt = (id) => `৳${fmtNum(parseFloat(document.getElementById(id)?.value) || 0)}`;
+    swapInputForText('calcAgencyAdsCost', fmtAmt('calcAgencyAdsCost'), 'font-weight:800;font-size:15px;color:#0F172A;font-variant-numeric:tabular-nums');
+    swapInputForText('calcOthersCost', fmtAmt('calcOthersCost'), 'font-weight:800;font-size:15px;color:#0F172A;font-variant-numeric:tabular-nums');
+    swapInputForText('calcOfficeRent', `- ${fmtAmt('calcOfficeRent')}`, 'font-weight:900;font-size:15px;color:#C2410C;font-variant-numeric:tabular-nums');
+    // Note input: show its text in place on the invoice; hide it when empty
+    const noteInput = document.getElementById('calcOthersCostNote');
+    if (noteInput) {
+      if (noteInput.value.trim()) {
+        swapInputForText('calcOthersCostNote', noteInput.value.trim(), 'font-weight:500;font-size:12.5px;color:#334155');
+      } else {
+        noteInput.style.display = 'none';
+        swapped.push({ input: noteInput, span: null });
+      }
+    }
     const canvas = await h2c(card, {
-      scale: 2,
+      scale: 3,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false
@@ -5533,14 +5574,18 @@ window.downloadCalculationImage = async function() {
     const link = document.createElement('a');
     const m = state.filters.month || 'Statement';
     const y = state.filters.year || new Date().getFullYear();
-    link.download = `AdVerse_Agency_Financial_Statement_${m}_${y}.png`;
+    link.download = `AdVerse_Agency_Invoice_${m}_${y}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
-    showToast('📸 Financial Statement PNG successfully exported!', 'success');
+    showToast('📸 Professional Invoice PNG successfully exported!', 'success');
   } catch (err) {
     console.error('Download image error:', err);
     showToast('Failed to generate image, please try again.', 'error');
   } finally {
+    swapped.forEach(({ input, span }) => {
+      if (span) span.remove();
+      if (input) input.style.display = '';
+    });
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = originalHtml;
