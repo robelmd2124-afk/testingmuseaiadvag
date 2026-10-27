@@ -6947,6 +6947,10 @@ function applyIncreasePaste() {
   const budgetInput = form.querySelector('[name="budget"]');
 
   if (typeSelect) typeSelect.value = 'Increase';
+  // Paste forces Increase even from Boost / Ad Campaign (2026-10-28):
+  // show the Old SL field too, so the form state matches the new type.
+  const oldSlWrap = form.querySelector('#oldSlFieldWrap');
+  if (oldSlWrap) oldSlWrap.style.display = 'block';
   if (pageInput) pageInput.value = pageName;
 
   // AD Account: pasted text may carry only the number ("102") or the
@@ -7623,6 +7627,14 @@ function renderEntryForm() {
     form.innerHTML = `
       <div id="increaseSmartNotice" class="increase-smart-notice" style="display:none"></div>
 
+      <div class="form-field ff-increase-paste" id="increasePasteFieldWrap" style="display:block;margin-bottom:12px">
+        <label style="color:var(--pri);font-weight:700">PREVIOUS CAMPAIGN PASTE</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" name="increase_paste" id="increasePasteInput" style="flex:1;border:1.5px solid var(--pri)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();applyIncreasePaste();}">
+          <button type="button" class="btn btn-primary btn-sm" onclick="applyIncreasePaste()" style="height:36px;padding:0 14px;white-space:nowrap;font-weight:700">Apply</button>
+        </div>
+      </div>
+
       <div class="entry-unified-grid">
         <!-- Row 1: Target & Page Identification -->
         <div class="entry-row-1">
@@ -7693,15 +7705,6 @@ function renderEntryForm() {
           <div class="form-field ff-old-sl" id="oldSlFieldWrap" style="display:none">
             <label style="color:var(--pri);font-weight:700">OLD SL <span class="req">*</span></label>
             <input type="text" name="old_sl" id="oldSlInput" placeholder="Old SL (e.g. 187)" style="border:1.5px solid var(--pri);font-weight:700;text-align:center" autocomplete="off">
-          </div>
-
-          <div class="form-field ff-increase-paste" id="increasePasteFieldWrap" style="display:none;grid-column:1 / -1">
-            <label style="color:var(--pri);font-weight:700">PREVIOUS CAMPAIGN PASTE — Increase only</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input type="text" name="increase_paste" id="increasePasteInput" placeholder="Paste previous campaign here, e.g. 10562/102 Tazim Lifestyle 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21" style="flex:1;border:1.5px solid var(--pri)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();applyIncreasePaste();}">
-              <button type="button" class="btn btn-primary btn-sm" onclick="applyIncreasePaste()" style="height:36px;padding:0 14px;white-space:nowrap;font-weight:700">Apply</button>
-            </div>
-            <div style="font-size:11px;color:var(--txt-muted);margin-top:4px">Pasted campaign-er Page Name, AD Account, ID Name bosbe, Start hobe oi campaign-er End Date, Type hobe Increase. Day ar Budget tumi notun kore diba. Shudhu Page Name paste korleo oi page-er latest campaign theke fill hobe. Boost / Ad Campaign-e ei box dekhabe na.</div>
           </div>
 
           <div class="form-field ff-day">
@@ -7886,10 +7889,11 @@ function renderEntryForm() {
     typeSelect?.addEventListener('change', () => {
       const startEl = form.querySelector('[name="start_date"]');
       const cardEl = form.querySelector('#pageRelevantCampaignCard');
-      const increasePasteWrap = form.querySelector('#increasePasteFieldWrap');
+      // Paste box is always at the top of the form (2026-10-28 change):
+      // it is never hidden by type. Pasting into it forces Types to
+      // Increase in applyIncreasePaste, whatever the current type is.
       if (typeSelect.value === 'Increase') {
         if (oldSlWrap) oldSlWrap.style.display = 'block';
-        if (increasePasteWrap) increasePasteWrap.style.display = 'block';
         if (oldSlInput) {
           setTimeout(() => oldSlInput.focus(), 80);
           if (oldSlInput.value) handleOldSlLookup(oldSlInput.value);
@@ -7899,7 +7903,6 @@ function renderEntryForm() {
         }
       } else {
         if (oldSlWrap) oldSlWrap.style.display = 'none';
-        if (increasePasteWrap) increasePasteWrap.style.display = 'none';
         if (cardEl) {
           cardEl.style.display = 'none';
           cardEl.innerHTML = '';
