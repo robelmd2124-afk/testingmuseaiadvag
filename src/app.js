@@ -8606,7 +8606,12 @@ function addMultipleCampaignRow() {
   const count = box.querySelectorAll('.multi-campaign-row').length + 2;
   const baseInput = document.querySelector('#entryForm [name="sl_no"]');
   const baseVal = baseInput ? parseInt(baseInput.value, 10) : (parseInt(state.nextSL, 10) || 1);
-  const rowSL = (baseVal > 0) ? String(baseVal + count - 1) : String(count);
+  // Serial SL for this row: always one past the highest SL already on the
+  // form (main + earlier extra rows), so deleting a row can never make a
+  // later row reuse an SL. The server still re-checks against the live
+  // sheet and bumps to the next free serial if this value is taken.
+  const existingSls = Array.from(box.querySelectorAll('.multi-campaign-sl')).map(el => parseInt(el.value, 10)).filter(n => !isNaN(n) && n > 0);
+  const rowSL = (baseVal > 0) ? String(Math.max(baseVal, ...existingSls) + 1) : String(count);
 
   // Inherit sensible default from main campaign if available
   const mainDayInput = document.querySelector('#entryForm [name="day"]');
@@ -8626,7 +8631,7 @@ function addMultipleCampaignRow() {
         <span class="multi-campaign-row-badge" style="background:linear-gradient(135deg,#8B5CF6,#6366F1);color:#fff;font-weight:700;font-size:11.5px;padding:3px 9px;border-radius:6px;display:inline-flex;align-items:center;gap:5px">
           <span>+ Campaign #${count}</span>
           <span style="background:rgba(255,255,255,0.24);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:11px">SL:</span>
-          <input type="number" class="multi-campaign-sl" value="${rowSL}" style="width:58px;height:20px;padding:0 4px;font-family:monospace;font-size:11px;font-weight:800;background:rgba(255,255,255,0.9);color:#1e1b4b;border:none;border-radius:4px;text-align:center" title="Editable unique Serial Number for this campaign">
+          <input type="number" class="multi-campaign-sl" value="${rowSL}" readonly style="width:58px;height:20px;padding:0 4px;font-family:monospace;font-size:11px;font-weight:800;background:rgba(255,255,255,0.9);color:#1e1b4b;border:none;border-radius:4px;text-align:center" title="Auto serial SL — always new, cannot be typed over">
         </span>
         <span class="multi-row-summary" style="font-size:12px;font-weight:700;color:var(--txt-muted)">Calculating...</span>
       </div>

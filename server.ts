@@ -5012,6 +5012,27 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
             let usedSl = usedSlBySheet.get(targetSheetEarly);
             if (!usedSl) {
               usedSl = new Set((memoryStore.campaigns[targetSheetEarly] || []).map((r: any) => parseInt(String(r['SL'] ?? '').replace(/\D/g, ''), 10)).filter((n: number) => n > 0));
+              // All-time unique serial SL: local memory can be stale when
+              // another side entered while this server was down, so also
+              // merge the SLs actually present in the live sheet right now.
+              // A client-supplied or stale next SL that is already in the
+              // sheet is then bumped below to the next free serial instead
+              // of ever being saved as a duplicate.
+              if (SHEET_ID) {
+                try {
+                  const fresh = await fetchSheetCsvGviz(SHEET_ID, targetSheetEarly);
+                  if (fresh && Array.isArray(fresh.rows)) {
+                    const slCol = (fresh.headers || []).findIndex((h: any) => String(h || '').trim().toLowerCase() === 'sl');
+                    for (const rowArr of fresh.rows) {
+                      const n = parseInt(String(rowArr[slCol >= 0 ? slCol : 0] || '').replace(/\D/g, ''), 10);
+                      if (n > 0) usedSl.add(n);
+                    }
+                  }
+                } catch (_) {
+                  // Fresh-sheet read failed: fall back to memory only rather
+                  // than blocking the entry; the bump loop still applies.
+                }
+              }
               usedSlBySheet.set(targetSheetEarly, usedSl);
             }
             while (usedSl.has(sl)) sl++;
