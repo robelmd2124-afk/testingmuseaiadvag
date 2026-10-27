@@ -3969,7 +3969,10 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
             success: true,
             totalCampaign: curMonthRows.length,
             totalBudget: curMonthRows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0),
-            totalTaka: curMonthRows.reduce((s, r) => s + (Number(r['Taka']) || 0), 0),
+            // 2026-10-28 (user rule): same as getAgencyCalculation — the
+            // Agency total comes from the Payment formula (Budget x Rate),
+            // not the Taka column sum, so it can never diverge from Payment.
+            totalTaka: Math.round(curMonthRows.reduce((s, r) => s + (Number(r['Budget']) || 0), 0) * (memoryStore.settings?.rate || 140) * 100) / 100,
             totalCost: (memoryStore.agencyCosts || []).reduce((s, r) => s + (Number(r['Cost'] || r['cost'] || 0) || 0), 0),
             totalPayment: paymentRows.reduce((s, r) => s + extractPaidAmount(r), 0)
           }
@@ -6032,8 +6035,16 @@ async function rpc(method: string, args: any[], req: express.Request, res: expre
       const totalCampaign = campaigns.length;
       const totalBudget = Math.round(campaigns.reduce((s, r) => s + extractBudgetAmount(r), 0) * 100) / 100;
       const rate = await getRate();
-      const totalTakaRaw = campaigns.reduce((s, r) => s + parseMoney(r['Taka']), 0);
-      const totalTaka = totalTakaRaw > 0 ? Math.round(totalTakaRaw * 100) / 100 : Math.round((totalBudget * rate) * 100) / 100;
+      // 2026-10-28 (user rule): Agency Calculation takes ALL its financial
+      // totals from the Payment calculation, never from the Taka column
+      // sum. Payment's Total Bill = Total Budget x Rate, so this is the
+      // same formula here. Before this, Agency summed the Taka column
+      // while Payment used Budget x Rate, so a single wrong Taka value
+      // (e.g. SL 10564: $35 budget with 9800 Taka) made the two tabs
+      // differ by exactly that error. With one shared formula the two
+      // tabs can no longer diverge. Per-row Taka values in campaignRows
+      // below are still the sheet's own values (for reference only).
+      const totalTaka = Math.round((totalBudget * rate) * 100) / 100;
 
       const payments = (await readRows('Payments', PAYMENT_HEADERS)).filter(isValidPaymentRow);
       const monthlyPayments = payments.filter(r => {
