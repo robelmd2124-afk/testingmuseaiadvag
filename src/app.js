@@ -6840,6 +6840,152 @@ function applyIncreaseCampaignByIndex(idx) {
   }
 }
 
+// Increase paste parser (2026-10-28): the generic parseCampaignString
+// assumes Types is ONE token, so for "Ad Campaign" (two tokens) it
+// misreads End/Start/Page. This parser instead finds the two date tokens
+// in the pasted line, so Page = tokens before the first date, Start =
+// first date, End = second date, Types = everything between the second
+// date and the Day token, whatever its word count. Pipe/key format is
+// delegated to parseCampaignString, which handles it correctly.
+function parseIncreasePasteCampaign(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  if (s.includes(':') && (s.includes('|') || s.includes('\n'))) {
+    const p = (typeof parseCampaignString === 'function') ? parseCampaignString(s) : null;
+    if (p) return p;
+  }
+  const slashMatch = s.match(/^([A-Za-z0-9]+)\/([A-Za-z0-9_-]+)\s+(.+)$/);
+  if (!slashMatch) return null;
+  const adNum = slashMatch[2];
+  const tokens = slashMatch[3].trim().split(/\s+/);
+  if (tokens.length < 5) return null;
+  const budget = tokens[tokens.length - 1].replace(/[^0-9.]/g, '');
+  const day = tokens[tokens.length - 2].replace(/[^0-9]/g, '');
+  if (!budget || !day) return null;
+  const body = tokens.slice(0, tokens.length - 2);
+  const isDateTok = (t) => /^\d{1,2}-[A-Za-z]{3}(-\d{2,4})?$/.test(t) || /^\d{4}-\d{2}-\d{2}$/.test(t) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(t);
+  const dateIdx = [];
+  body.forEach((t, i) => { if (isDateTok(t)) dateIdx.push(i); });
+  if (dateIdx.length < 2) return null;
+  const pageName = body.slice(0, dateIdx[0]).join(' ');
+  if (!pageName) return null;
+  return {
+    'SL': slashMatch[1], 'sl_no': slashMatch[1],
+    'AD Account': adNum, 'AD': adNum, 'AD Number': adNum,
+    'ID Name': adNum,
+    'Page Name': pageName, 'page_name': pageName,
+    'Start': body[dateIdx[0]], 'start_date': body[dateIdx[0]],
+    'End': body[dateIdx[1]], 'end_date': body[dateIdx[1]],
+    'Types': body.slice(dateIdx[1] + 1).join(' '), 'types': body.slice(dateIdx[1] + 1).join(' '),
+    'Day': day, 'day': day,
+    'Budget': budget, 'budget': budget
+  };
+}
+
+// Increase paste box (2026-10-28, user rule): paste the exact previous
+// campaign text copied from the table (e.g. "10562/102 Tazim Lifestyle
+// 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21") into the entry form while
+// Types = Increase, and the new campaign is built from THAT campaign:
+// Page Name, AD Account and ID Name from the pasted campaign, Start =
+// pasted campaign's End Date, Types forced to Increase (even if the old
+// campaign was Boost / Ad Campaign). Day and Budget are deliberately
+// cleared so the user must give new ones — the old Day/Budget are never
+// copied. The old SL is deliberately NOT copied into the SL field: the
+// SL field stays on the auto serial and the server assigns the next
+// serial (max + 1) on save. This box is only shown for Increase;
+// Boost / Ad Campaign must be written anew.
+// NOTE: page-history lookup is NOT run here on purpose — its async
+// profile callback would refill Day/Budget from most-frequent history
+// and could overwrite the cleared fields, and its "latest campaign"
+// guess could differ from the exact campaign the user pasted.
+function applyIncreasePaste() {
+  const form = document.getElementById('entryForm');
+  const pasteInput = document.getElementById('increasePasteInput');
+  const text = (pasteInput?.value || '').trim();
+  if (!form || !text) {
+    showToast('Age previous campaign-er text paste koro', 'warning');
+    return;
+  }
+  let p = parseIncreasePasteCampaign(text);
+  // Page-name-only paste fallback: if the user pasted just a page name
+  // (no SL/AD, no dates), use that page's latest campaign from the
+  // loaded records, so the same box works for both paste styles.
+  if (!p) {
+    const allRecords = [...(state.rawRecords || []), ...(state.records || []), ...(state.todayCreated || [])];
+    const matches = allRecords.filter(r => String(r['Page Name'] || r.page_name || '').trim().toLowerCase() === text.trim().toLowerCase());
+    matches.sort((a, b) => {
+      const da = parseAnyDate(a['End'] || a['End Date'] || a.end_date || '');
+      const db = parseAnyDate(b['End'] || b['End Date'] || b.end_date || '');
+      return (db ? db.getTime() : 0) - (da ? da.getTime() : 0);
+    });
+    const latest = matches[0];
+    if (latest) {
+      p = {
+        'Page Name': latest['Page Name'] || latest.page_name || '',
+        'AD Account': latest['AD Account'] || latest.ad_account || '',
+        'ID Name': latest['ID Name'] || latest.id_name || '',
+        'End': latest['End'] || latest['End Date'] || latest.end_date || ''
+      };
+    }
+  }
+  const pageName = p ? (p['Page Name'] || p.page_name || '') : '';
+  const endRaw = p ? (p['End'] || p.end_date || '') : '';
+  const parsedEnd = endRaw ? parseAnyDate(endRaw) : null;
+  if (!p || !pageName || !parsedEnd) {
+    showToast('Paste kora text theke Page Name ba End Date pawa jay nai. Format: SL/AD Page Start End Type Day $Budget, ba shudhu Page Name', 'warning');
+    return;
+  }
+
+  const typeSelect = form.querySelector('#typesSelect') || form.querySelector('[name="types"]');
+  const pageInput = form.querySelector('#pageNameInput') || form.querySelector('[name="page_name"]');
+  const adInput = form.querySelector('#adAccountInput') || form.querySelector('[name="ad_account"]');
+  const idInput = form.querySelector('#idNameInput') || form.querySelector('[name="id_name"]');
+  const statusSelect = form.querySelector('#statusSelect') || form.querySelector('[name="status"]');
+  const startInput = form.querySelector('[name="start_date"]');
+  const endInput = form.querySelector('[name="end_date"]');
+  const dayInput = form.querySelector('[name="day"]');
+  const budgetInput = form.querySelector('[name="budget"]');
+
+  if (typeSelect) typeSelect.value = 'Increase';
+  if (pageInput) pageInput.value = pageName;
+
+  // AD Account: pasted text may carry only the number ("102") or the
+  // full account ("Agency | 102"). Resolve the full account + ID Name
+  // from the known accounts list when possible; otherwise use what was
+  // pasted (a full account string) and the parsed ID Name.
+  const adRaw = String(p['AD Account'] || p.AD || '').trim();
+  const adNum = adRaw.replace(/[^0-9]/g, '').replace(/^0+/, '') || adRaw.replace(/[^0-9]/g, '');
+  let matchedAd = null;
+  if (adNum) {
+    matchedAd = (state.adAccounts || []).find(a => {
+      const aNum = String(a.a || '').replace(/[^0-9]/g, '').replace(/^0+/, '');
+      return aNum && aNum === adNum;
+    }) || null;
+  }
+  if (adInput) adInput.value = matchedAd ? matchedAd.a : adRaw;
+  if (idInput) idInput.value = matchedAd ? (matchedAd.id || '') : (p['ID Name'] || p.id_name || '');
+  if (statusSelect) statusSelect.value = 'Old Page';
+
+  if (startInput) {
+    startInput.value = toInputDateValue(endRaw);
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    startInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // New Day / Budget must be given by the user — clear both (and the
+  // computed End, which only makes sense once a new Day is given).
+  if (dayInput) dayInput.value = '';
+  if (budgetInput) budgetInput.value = '';
+  if (endInput) endInput.value = '';
+  form.querySelectorAll('.day-preset-chip').forEach(chip => chip.classList.remove('active'));
+  form.querySelectorAll('.bud-preset-chip').forEach(chip => chip.classList.remove('active'));
+  if (typeof window.updateCampaignCalc === 'function') window.updateCampaignCalc();
+
+  if (pasteInput) pasteInput.value = '';
+  if (dayInput) dayInput.focus();
+  showToast(`⚡ Increase ready: ${pageName} — Start = ${formatCustomDate(endRaw)}. Day ar Budget notun kore dao.`, 'success');
+}
+window.applyIncreasePaste = applyIncreasePaste;
+
 function applyIncreaseStartDate(dateStr) {
   const form = document.getElementById('entryForm');
   if (!form) return;
@@ -6899,6 +7045,8 @@ function quickIncreaseCampaign(r) {
   if (idInput) idInput.value = r['ID Name'] || '';
   if (statusSelect) statusSelect.value = r['Status'] || 'Old Page';
   if (typeSelect) typeSelect.value = 'Increase';
+  const increasePasteWrap = form.querySelector('#increasePasteFieldWrap');
+  if (increasePasteWrap) increasePasteWrap.style.display = 'block';
   if (startInput && inputDateVal) {
     startInput.value = inputDateVal;
     startInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -7547,6 +7695,15 @@ function renderEntryForm() {
             <input type="text" name="old_sl" id="oldSlInput" placeholder="Old SL (e.g. 187)" style="border:1.5px solid var(--pri);font-weight:700;text-align:center" autocomplete="off">
           </div>
 
+          <div class="form-field ff-increase-paste" id="increasePasteFieldWrap" style="display:none;grid-column:1 / -1">
+            <label style="color:var(--pri);font-weight:700">PREVIOUS CAMPAIGN PASTE — Increase only</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" name="increase_paste" id="increasePasteInput" placeholder="Paste previous campaign here, e.g. 10562/102 Tazim Lifestyle 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21" style="flex:1;border:1.5px solid var(--pri)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();applyIncreasePaste();}">
+              <button type="button" class="btn btn-primary btn-sm" onclick="applyIncreasePaste()" style="height:36px;padding:0 14px;white-space:nowrap;font-weight:700">Apply</button>
+            </div>
+            <div style="font-size:11px;color:var(--txt-muted);margin-top:4px">Pasted campaign-er Page Name, AD Account, ID Name bosbe, Start hobe oi campaign-er End Date, Type hobe Increase. Day ar Budget tumi notun kore diba. Shudhu Page Name paste korleo oi page-er latest campaign theke fill hobe. Boost / Ad Campaign-e ei box dekhabe na.</div>
+          </div>
+
           <div class="form-field ff-day">
             <label>DAY <span class="req">*</span></label>
             <input type="number" name="day" id="dayInput" min="1" value="2" required style="text-align:center">
@@ -7729,8 +7886,10 @@ function renderEntryForm() {
     typeSelect?.addEventListener('change', () => {
       const startEl = form.querySelector('[name="start_date"]');
       const cardEl = form.querySelector('#pageRelevantCampaignCard');
+      const increasePasteWrap = form.querySelector('#increasePasteFieldWrap');
       if (typeSelect.value === 'Increase') {
         if (oldSlWrap) oldSlWrap.style.display = 'block';
+        if (increasePasteWrap) increasePasteWrap.style.display = 'block';
         if (oldSlInput) {
           setTimeout(() => oldSlInput.focus(), 80);
           if (oldSlInput.value) handleOldSlLookup(oldSlInput.value);
@@ -7740,6 +7899,7 @@ function renderEntryForm() {
         }
       } else {
         if (oldSlWrap) oldSlWrap.style.display = 'none';
+        if (increasePasteWrap) increasePasteWrap.style.display = 'none';
         if (cardEl) {
           cardEl.style.display = 'none';
           cardEl.innerHTML = '';
