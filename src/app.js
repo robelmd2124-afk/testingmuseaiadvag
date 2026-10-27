@@ -6884,16 +6884,19 @@ function parseIncreasePasteCampaign(text) {
 
 // Increase paste box (2026-10-28, user rule): paste the exact previous
 // campaign text copied from the table (e.g. "10562/102 Tazim Lifestyle
-// 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21") into the entry form while
-// Types = Increase, and the new campaign is built from THAT campaign:
-// Page Name, AD Account and ID Name from the pasted campaign, Start =
-// pasted campaign's End Date, Types forced to Increase (even if the old
-// campaign was Boost / Ad Campaign). Day and Budget are deliberately
-// cleared so the user must give new ones — the old Day/Budget are never
-// copied. The old SL is deliberately NOT copied into the SL field: the
-// SL field stays on the auto serial and the server assigns the next
-// serial (max + 1) on save. This box is only shown for Increase;
-// Boost / Ad Campaign must be written anew.
+// 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21") into the entry form at
+// the top, and the new campaign is built from THAT campaign:
+// Page Name from the pasted campaign, AD Account / ID Name from that
+// page's LAST campaign in the loaded records (falling back to the
+// pasted campaign's account), Start = pasted campaign's End Date,
+// Types forced to Increase (even if the old campaign was Boost /
+// Ad Campaign). Day and Budget are deliberately cleared so the user
+// must give new ones — the old Day/Budget are never copied. The old
+// SL is deliberately NOT copied into the SL field: the SL field stays
+// on the auto serial and the server assigns the next serial (max + 1)
+// on save. After a successful paste the Old SL box is hidden and
+// cleared, because it is no longer needed — only Day + Budget remain,
+// then Save.
 // NOTE: page-history lookup is NOT run here on purpose — its async
 // profile callback would refill Day/Budget from most-frequent history
 // and could overwrite the cleared fields, and its "latest campaign"
@@ -6947,16 +6950,28 @@ function applyIncreasePaste() {
   const budgetInput = form.querySelector('[name="budget"]');
 
   if (typeSelect) typeSelect.value = 'Increase';
-  // Paste forces Increase even from Boost / Ad Campaign (2026-10-28):
-  // show the Old SL field too, so the form state matches the new type.
-  const oldSlWrap = form.querySelector('#oldSlFieldWrap');
-  if (oldSlWrap) oldSlWrap.style.display = 'block';
   if (pageInput) pageInput.value = pageName;
 
-  // AD Account: pasted text may carry only the number ("102") or the
-  // full account ("Agency | 102"). Resolve the full account + ID Name
-  // from the known accounts list when possible; otherwise use what was
-  // pasted (a full account string) and the parsed ID Name.
+  // AD Account (2026-10-28, user rule): the page's LAST ad account.
+  // Look up this page's latest campaign in the loaded records (latest
+  // End date, then highest SL) and use its AD Account / ID Name. That
+  // is the account the page is currently on, even if the pasted
+  // campaign is an older one that used a different account. If no
+  // history is loaded for the page, fall back to the pasted campaign's
+  // account: the pasted text may carry only the number ("102") or the
+  // full account ("Agency | 102"), resolved against the known accounts
+  // list when possible.
+  const pageRecords = [...(state.rawRecords || []), ...(state.records || []), ...(state.todayCreated || [])].filter(r => String(r['Page Name'] || r.page_name || '').trim().toLowerCase() === pageName.trim().toLowerCase());
+  pageRecords.sort((a, b) => {
+    const da = parseAnyDate(a['End'] || a['End Date'] || a.end_date || '');
+    const db = parseAnyDate(b['End'] || b['End Date'] || b.end_date || '');
+    const timeDiff = (db ? db.getTime() : 0) - (da ? da.getTime() : 0);
+    if (timeDiff !== 0) return timeDiff;
+    return (parseInt(String(b.SL || b.sl_no || 0).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.SL || a.sl_no || 0).replace(/\D/g, ''), 10) || 0);
+  });
+  const latestPage = pageRecords[0] || null;
+  const latestAd = latestPage ? String(latestPage['AD Account'] || latestPage.ad_account || '').trim() : '';
+  const latestId = latestPage ? String(latestPage['ID Name'] || latestPage.id_name || '').trim() : '';
   const adRaw = String(p['AD Account'] || p.AD || '').trim();
   const adNum = adRaw.replace(/[^0-9]/g, '').replace(/^0+/, '') || adRaw.replace(/[^0-9]/g, '');
   let matchedAd = null;
@@ -6966,8 +6981,8 @@ function applyIncreasePaste() {
       return aNum && aNum === adNum;
     }) || null;
   }
-  if (adInput) adInput.value = matchedAd ? matchedAd.a : adRaw;
-  if (idInput) idInput.value = matchedAd ? (matchedAd.id || '') : (p['ID Name'] || p.id_name || '');
+  if (adInput) adInput.value = latestAd || (matchedAd ? matchedAd.a : adRaw);
+  if (idInput) idInput.value = latestId || (matchedAd ? (matchedAd.id || '') : (p['ID Name'] || p.id_name || ''));
   if (statusSelect) statusSelect.value = 'Old Page';
 
   if (startInput) {
@@ -6984,9 +6999,19 @@ function applyIncreasePaste() {
   form.querySelectorAll('.bud-preset-chip').forEach(chip => chip.classList.remove('active'));
   if (typeof window.updateCampaignCalc === 'function') window.updateCampaignCalc();
 
+  // Old SL is no longer needed once a campaign has been pasted
+  // (2026-10-28): the pasted campaign already identifies the previous
+  // campaign, so hide its box and clear it. After this, only Day +
+  // Budget are left for the user, then Save — the easy process.
+  const oldSlWrap = form.querySelector('#oldSlFieldWrap');
+  const oldSlInput = form.querySelector('#oldSlInput');
+  if (oldSlWrap) oldSlWrap.style.display = 'none';
+  if (oldSlInput) oldSlInput.value = '';
+
   if (pasteInput) pasteInput.value = '';
   if (dayInput) dayInput.focus();
-  showToast(`⚡ Increase ready: ${pageName} — Start = ${formatCustomDate(endRaw)}. Day ar Budget notun kore dao.`, 'success');
+  const finalAd = adInput ? adInput.value : '';
+  showToast(`⚡ Increase ready: ${pageName} — AD ${finalAd || ''} — Start = ${formatCustomDate(endRaw)}. Day ar Budget dao, tarpor Save.`, 'success');
 }
 window.applyIncreasePaste = applyIncreasePaste;
 
