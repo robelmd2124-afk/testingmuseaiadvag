@@ -6549,7 +6549,13 @@ function fallbackCopyCampaignText(text) {
 
 async function copyMultipleRecordsSequentially(items) {
   if (!items || !items.length) return;
-  const list = items.map(r => typeof r === 'string' ? r : formatCampaignText(r)).filter(Boolean);
+  const rawList = items.map(r => typeof r === 'string' ? r : formatCampaignText(r)).filter(Boolean);
+  // Clipboard fix (2026-10-27): an optimistic batch whose rows carried the
+  // same SL (before the server bumped the second one to the next serial)
+  // used to write the SAME text twice, so Win+V showed e.g. 10562 twice
+  // and the real 10563 never appeared. Drop exact duplicates, keeping
+  // the first occurrence, so every history entry is a distinct campaign.
+  const list = [...new Set(rawList)];
   if (!list.length) return;
 
   if (list.length === 1) {
@@ -6558,7 +6564,10 @@ async function copyMultipleRecordsSequentially(items) {
   }
 
   // To register separate individual entries in Windows Clipboard History (Win + V):
-  // We write each campaign individually into the clipboard separated by a brief delay (75ms).
+  // We write each campaign individually into the clipboard separated by a delay.
+  // 75ms was too fast: Windows Clipboard History could miss/coalesce rapid
+  // writes, so only one campaign (usually the first) survived in history.
+  // 300ms gives each write time to register as its own history entry.
   // Writing in reverse order ensures that the FIRST campaign (e.g. SL 390) becomes the current
   // top active clipboard item (for immediate Ctrl+V), while the next campaigns (SL 391, etc.)
   // are right underneath it as distinct separate entries in Win + V!
@@ -6575,7 +6584,7 @@ async function copyMultipleRecordsSequentially(items) {
       fallbackCopyCampaignText(text);
     }
     if (i < reversed.length - 1) {
-      await new Promise(r => setTimeout(r, 75));
+      await new Promise(r => setTimeout(r, 300));
     }
   }
 
@@ -8341,8 +8350,20 @@ async function saveEntry() {
       
       if (batchItems.length) {
         const baseNum = parseInt(data.sl_no || state.nextSL || '1', 10) || 1;
+        // Clipboard/SL fix (2026-10-27): never let two optimistic batch rows
+        // carry the same SL, even if both rows arrived with the same sl_no.
+        // The server bumps the second one anyway, but the clipboard copy
+        // happens from these optimistic rows first — a duplicate here is
+        // exactly how Win+V ended up with the same SL twice.
+        const usedOptimisticSl = new Set();
         batchItems.forEach((bItem, bIdx) => {
-          const itemSl = bItem.sl_no ? String(bItem.sl_no) : String(baseNum + bIdx);
+          let itemSl = bItem.sl_no ? String(bItem.sl_no) : String(baseNum + bIdx);
+          let itemSlNum = parseInt(itemSl.replace(/\D/g, ''), 10);
+          if (!isNaN(itemSlNum)) {
+            while (usedOptimisticSl.has(itemSlNum)) itemSlNum++;
+            usedOptimisticSl.add(itemSlNum);
+            itemSl = String(itemSlNum);
+          }
           const dVal = Number(bItem.day) || 1;
           const bVal = Number(bItem.budget) || 0;
           const tVal = bVal * rateVal;
@@ -8470,17 +8491,22 @@ async function saveEntry() {
       // 3. Instantly reset form and calculate next sequential SL NO
       resetEntryForm();
 
-      // 4. Quick visual button flash
+      // 4. Quick visual button flash — PENDING, not "saved" yet.
+      // Save-confirmation fix (2026-10-27): the old code flashed
+      // "Saved & Copied!" and a success toast BEFORE the server RPC
+      // finished, so a row that never reached the server/sheet still
+      // looked saved — and vanished on reload, exactly as reported.
+      // The row is only "saved" once the RPC below confirms it.
       if (saveBtn) {
-        saveBtn.innerHTML = '<span class="ms" style="font-size:16px">check_circle</span> Saved & Copied!';
-        saveBtn.style.background = '#10b981';
+        saveBtn.innerHTML = '<span class="ms" style="font-size:16px">hourglass_top</span> Saving…';
+        saveBtn.style.background = '#f59e0b';
         setTimeout(() => {
           saveBtn.style.background = '';
           saveBtn.innerHTML = '<span class="ms" style="font-size:16px">bolt</span> Save Campaign (Ctrl+↵)';
         }, 800);
       }
 
-      showToast('⚡ Campaign saved! Google Sheet-e sync hocche 📋', 'success');
+      showToast('⏳ Saving… Google Sheet-e sync hocche, confirm howar age reload korben na 📋', 'info');
 
       // 5. Asynchronous background server & Google Sheet persistence with Vault Backup
       // NOTE: the server RPC below is the ONLY sheet writer for campaigns.
@@ -8499,8 +8525,18 @@ async function saveEntry() {
           } else {
             res = await cloudRpc('addCampaign', [data]);
           }
-          if (res && res.success) {
-            const confirmedRecords = res.records || (res.record ? [res.record] : (res.items ? res.items.map(it => it.record) : []));
+          // Save-confirmation fix (2026-10-27): the RPC fallback returns
+          // success:true with offline:true when the server never answered,
+          // and the server flags sheetSynced:false when the sheet write
+          // failed. Both used to fall through as "confirmed" below (the
+          // fallback's records object has no length, so the vault was
+          // marked 'confirmed' anyway) — the row then vanished on reload.
+          // Neither case is a confirmed save now.
+          const isOfflineFallback = Boolean(res && res.offline);
+          const sheetWriteFailed = Boolean(res && res.sheetSynced === false);
+          if (res && res.success && !isOfflineFallback && !sheetWriteFailed) {
+            showToast('✅ Campaign saved & synced!', 'success');
+            const confirmedRecords = Array.isArray(res.records) ? res.records : (res.record ? [res.record] : (res.items ? res.items.map(it => it.record) : []));
             if (confirmedRecords.length > 0) {
               const replaceList = (list) => {
                 if (!Array.isArray(list)) return;
@@ -8533,7 +8569,10 @@ async function saveEntry() {
             state.clientCache = {};
             saveLocalAppSnapshot();
             if (confirmedRecords.length > 0) replaceVaultItemsWithConfirmed(optimisticItems, confirmedRecords);
-            else saveEntryToVault(optimisticItems, 'confirmed');
+            // No confirmed records = not confirmed. Keep the optimistic row
+            // as 'saved' (pending), never 'confirmed', so a reload does not
+            // silently drop a row the user believed was saved.
+            else saveEntryToVault(optimisticItems, 'saved');
           } else {
             console.warn('Server addCampaign unconfirmed:', res);
             enqueueOfflineSync({
@@ -8543,7 +8582,13 @@ async function saveEntry() {
               optimisticItems,
               timestamp: Date.now()
             });
-            showToast('⚠️ Saved locally! Syncing with server in progress...', 'warning');
+            if (sheetWriteFailed) {
+              showToast('⚠️ Sheet-e jayni! App-e ache, retry hocche — sheet-e na dekha porjonto ei entry confirm na, reload korle harate pare.', 'error');
+            } else if (isOfflineFallback) {
+              showToast('⚠️ Server-e pouchayni! Locally saved, auto-sync hobe — sheet-e na dekha porjonto confirm na.', 'warning');
+            } else {
+              showToast('⚠️ Saved locally! Syncing with server in progress...', 'warning');
+            }
           }
         } catch (syncErr) {
           console.warn('Background sync note:', syncErr);
@@ -8554,7 +8599,7 @@ async function saveEntry() {
             optimisticItems,
             timestamp: Date.now()
           });
-          showToast('⚠️ Saved locally! Will auto-sync once connection stabilizes.', 'info');
+          showToast('⚠️ Server error! Locally saved, auto-sync hobe — sheet-e na dekha porjonto confirm na, reload korle harate pare.', 'warning');
         }
       })();
 
@@ -12310,6 +12355,11 @@ function focusPreviousRow() {
 }
 
 function renderRowFocusMenu(r, rIdx, totalCount) {
+  // Floating row-focus menu deleted per user request (2026-10-27):
+  // the HTML bar was removed, so there is nothing to render. Row click
+  // still opens the Campaign Inspector directly, and the table's own
+  // Copy button still copies the correct row.
+  return;
   const menu = document.getElementById('rowFocusFloatingMenu');
   if (!menu) return;
 
