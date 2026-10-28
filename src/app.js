@@ -8712,14 +8712,16 @@ async function saveEntry() {
       // Immediately save to local persistent snapshot so data is permanently preserved
       saveLocalAppSnapshot();
 
-      // 2. Instantly copy campaign to clipboard (Direct gesture context = 100% reliable)
-      if (optimisticItems.length > 1) {
-        copyMultipleRecordsSequentially(optimisticItems);
-      } else if (optimisticItems[0]) {
-        copyCampaignRecord(optimisticItems[0]);
-      }
-
-      renderSavedCampaignsNotice(optimisticItems);
+      // 2. Copy fix (2026-10-28): do NOT copy the optimistic rows here.
+      // The optimistic SL is only a guess — the form's SL can be stale
+      // (other side entered meanwhile, or a batch row duplicated the
+      // main row's SL) and the server bumps it on confirmation. A
+      // clipboard write made now stays wrong in Win+V history forever,
+      // even after the app table shows the true SL — exactly the
+      // 10573/10574 case reported. The copy happens below, only after
+      // the server confirms, from the confirmed records, so copied
+      // text always carries the actual SL. The saved notice is also
+      // rendered with confirmed records only, for the same reason.
 
       // 3. Instantly reset form and calculate next sequential SL NO
       resetEntryForm();
@@ -8774,7 +8776,11 @@ async function saveEntry() {
               const replaceList = (list) => {
                 if (!Array.isArray(list)) return;
                 optimisticItems.forEach((opt, optIdx) => {
-                  const conf = confirmedRecords[optIdx] || confirmedRecords[0];
+                  // Match by Record ID first: the server may return the
+                  // batch in a different order than the optimistic rows,
+                  // and index-only pairing can attach the wrong SL to a
+                  // row (page/AD right, SL wrong in the copy).
+                  const conf = confirmedRecords.find(c => c && (String(c['Record ID'] || '') === String(opt['Record ID'] || '') || String(c._recordId || '') === String(opt._recordId || ''))) || confirmedRecords[optIdx] || confirmedRecords[0];
                   if (!conf) return;
                   const idx = list.findIndex(r => r === opt || r['Record ID'] === opt['Record ID'] || r._recordId === opt._recordId);
                   if (idx >= 0) {
@@ -8786,18 +8792,22 @@ async function saveEntry() {
               replaceList(state.filteredRecords);
               replaceList(state.masterCampaignRegistry);
               replaceList(state.todayCreatedRegistry);
-              // Re-copy with the server-confirmed SLs when they differ from
-              // the optimistic ones, so pasted campaign names always carry
-              // the true SL numbers (the optimistic SL is only a guess when
-              // the server had to bump a taken number).
-              const slChanged = confirmedRecords.some((conf, i) => {
-                const opt = optimisticItems[i];
-                return opt && String(conf['SL'] ?? '') !== String(opt['SL'] ?? '');
-              });
-              if (slChanged) {
-                if (confirmedRecords.length > 1) copyMultipleRecordsSequentially(confirmedRecords);
-                else if (confirmedRecords[0]) copyCampaignRecord(confirmedRecords[0]);
-              }
+              // Copy fix (2026-10-28): the table Copy button reads from
+              // currentRenderedRecords and the saved-notice Copy button
+              // reads from lastSavedCampaigns — both used to keep the
+              // optimistic row after confirmation, so a manual copy
+              // after save could still paste the guessed SL. Update
+              // both lists with the confirmed records too.
+              replaceList(state.currentRenderedRecords);
+              replaceList(state.lastSavedCampaigns);
+              // Copy ONLY the server-confirmed records, unconditionally:
+              // the optimistic copy at save time is gone, so this is the
+              // single copy the user gets, and it always carries the
+              // actual SL. The saved notice is re-rendered with the
+              // confirmed records, so its Copy button copies them too.
+              if (confirmedRecords.length > 1) copyMultipleRecordsSequentially(confirmedRecords);
+              else if (confirmedRecords[0]) copyCampaignRecord(confirmedRecords[0]);
+              renderSavedCampaignsNotice(confirmedRecords);
             }
             state.clientCache = {};
             saveLocalAppSnapshot();
