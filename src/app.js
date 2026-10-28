@@ -6931,9 +6931,10 @@ function parseIncreasePasteCampaign(text) {
 // campaign text copied from the table (e.g. "10562/102 Tazim Lifestyle
 // 29-Oct-2026 04-Nov-2026 Ad Campaign 6 $21") into the entry form at
 // the top, and the new campaign is built from THAT campaign:
-// Page Name from the pasted campaign, AD Account / ID Name from that
-// page's LAST campaign in the loaded records (falling back to the
-// pasted campaign's account), Start = pasted campaign's End Date,
+// Page Name from the pasted campaign, AD Account / ID Name ONLY from
+// that page's LAST campaign in the full registry (never from the
+// pasted text; blank with a warning if no history is found),
+// Start = pasted campaign's End Date,
 // Types forced to Increase (even if the old campaign was Boost /
 // Ad Campaign). Day and Budget are deliberately cleared so the user
 // must give new ones — the old Day/Budget are never copied. The old
@@ -6997,16 +6998,23 @@ function applyIncreasePaste() {
   if (typeSelect) typeSelect.value = 'Increase';
   if (pageInput) pageInput.value = pageName;
 
-  // AD Account (2026-10-28, user rule): the page's LAST ad account.
-  // Look up this page's latest campaign in the loaded records (latest
-  // End date, then highest SL) and use its AD Account / ID Name. That
-  // is the account the page is currently on, even if the pasted
-  // campaign is an older one that used a different account. If no
-  // history is loaded for the page, fall back to the pasted campaign's
-  // account: the pasted text may carry only the number ("102") or the
-  // full account ("Agency | 102"), resolved against the known accounts
-  // list when possible.
-  const pageRecords = [...(state.rawRecords || []), ...(state.records || []), ...(state.todayCreated || [])].filter(r => String(r['Page Name'] || r.page_name || '').trim().toLowerCase() === pageName.trim().toLowerCase());
+  // AD Account / ID Name (2026-10-28, user rule): ONLY from this
+  // page's old data — NEVER from the pasted text. The pasted text
+  // carries only an AD number token, and that token can be stale or
+  // mangled (e.g. Colors of Bangles pasted as "026/460" while its
+  // real account is Agency | 026) — using it filled "460" into both
+  // the AD Account and ID Name fields, which is wrong twice over:
+  // the account was wrong, and an ID Name is a person's name, never
+  // an AD number. So: Apply takes ONLY Page Name and Start (pasted
+  // End) from the paste; AD/ID come from the page's latest campaign.
+  // The search pool MUST include masterCampaignRegistry (the full
+  // persisted registry): the old lookup searched only the current
+  // view's records, so a page whose history was not in the current
+  // view found nothing and fell back to the pasted number.
+  // If no history is found at all, AD/ID are left BLANK with a
+  // warning — never filled from the pasted text — so the user
+  // selects them manually instead of saving a wrong account.
+  const pageRecords = [...(state.masterCampaignRegistry || []), ...(state.rawRecords || []), ...(state.records || []), ...(state.todayCreated || [])].filter(r => String(r['Page Name'] || r.page_name || '').trim().toLowerCase() === pageName.trim().toLowerCase());
   pageRecords.sort((a, b) => {
     const da = parseAnyDate(a['End'] || a['End Date'] || a.end_date || '');
     const db = parseAnyDate(b['End'] || b['End Date'] || b.end_date || '');
@@ -7017,17 +7025,9 @@ function applyIncreasePaste() {
   const latestPage = pageRecords[0] || null;
   const latestAd = latestPage ? String(latestPage['AD Account'] || latestPage.ad_account || '').trim() : '';
   const latestId = latestPage ? String(latestPage['ID Name'] || latestPage.id_name || '').trim() : '';
-  const adRaw = String(p['AD Account'] || p.AD || '').trim();
-  const adNum = adRaw.replace(/[^0-9]/g, '').replace(/^0+/, '') || adRaw.replace(/[^0-9]/g, '');
-  let matchedAd = null;
-  if (adNum) {
-    matchedAd = (state.adAccounts || []).find(a => {
-      const aNum = String(a.a || '').replace(/[^0-9]/g, '').replace(/^0+/, '');
-      return aNum && aNum === adNum;
-    }) || null;
-  }
-  if (adInput) adInput.value = latestAd || (matchedAd ? matchedAd.a : adRaw);
-  if (idInput) idInput.value = latestId || (matchedAd ? (matchedAd.id || '') : (p['ID Name'] || p.id_name || ''));
+  const historyMissing = !latestPage || (!latestAd && !latestId);
+  if (adInput) adInput.value = historyMissing ? '' : latestAd;
+  if (idInput) idInput.value = historyMissing ? '' : latestId;
   if (statusSelect) statusSelect.value = 'Old Page';
 
   if (startInput) {
@@ -7054,9 +7054,14 @@ function applyIncreasePaste() {
   if (oldSlInput) oldSlInput.value = '';
 
   if (pasteInput) pasteInput.value = '';
-  if (dayInput) dayInput.focus();
   const finalAd = adInput ? adInput.value : '';
-  showToast(`⚡ Increase ready: ${pageName} — AD ${finalAd || ''} — Start = ${formatCustomDate(endRaw)}. Day ar Budget dao, tarpor Save.`, 'success');
+  if (historyMissing) {
+    showToast(`⚠️ ${pageName} — Start = ${formatCustomDate(endRaw)} boseche, kintu ei page-er ager data pawa jay nai, tai AD Account ar ID Name khali rakha hoise. AD/ID nije select koro, tarpor Day ar Budget dao, tarpor Save.`, 'warning');
+    if (adInput) adInput.focus();
+  } else {
+    if (dayInput) dayInput.focus();
+    showToast(`⚡ Increase ready: ${pageName} — AD ${finalAd || ''} — Start = ${formatCustomDate(endRaw)}. Day ar Budget dao, tarpor Save.`, 'success');
+  }
 }
 window.applyIncreasePaste = applyIncreasePaste;
 
