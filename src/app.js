@@ -7699,8 +7699,8 @@ function renderEntryForm() {
 
       <div class="form-field ff-increase-paste" id="increasePasteFieldWrap" style="display:block;margin-bottom:12px">
         <label style="color:var(--pri);font-weight:700">PREVIOUS CAMPAIGN PASTE</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" name="increase_paste" id="increasePasteInput" style="flex:1;border:1.5px solid var(--pri)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();applyIncreasePaste();}">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" name="increase_paste" id="increasePasteInput" style="flex:0 1 560px;min-width:220px;max-width:100%;border:1.5px solid var(--pri)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();applyIncreasePaste();}">
           <button type="button" class="btn btn-primary btn-sm" onclick="applyIncreasePaste()" style="height:36px;padding:0 14px;white-space:nowrap;font-weight:700">Apply</button>
         </div>
       </div>
