@@ -13516,25 +13516,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnAddPayment')?.addEventListener('click', addPaymentRecord);
   document.getElementById('btnSaveRecord')?.addEventListener('click', saveModalRecord);
   
-  document.addEventListener('click', (e) => {
-    const saveBtnTarget = e.target.closest('#btnSaveEntry');
-    if (saveBtnTarget) {
-      e.preventDefault();
-      if (typeof window.saveEntry === 'function') {
-        window.saveEntry();
-      }
-    }
-  });
-
-  const entryFormEl = document.getElementById('entryForm');
-  if (entryFormEl) {
-    entryFormEl.addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (typeof window.saveEntry === 'function') {
-        window.saveEntry();
-      }
-    });
-  }
+  // Save-double fix (2026-10-28): these two handlers used to call
+  // saveEntry a SECOND time for the same user action, which is why
+  // "Please enter a Page Name!" appeared even though the campaign
+  // saved fine. The Save button already has its own onclick (set in
+  // renderEntryForm), and the form already has form.onsubmit — so one
+  // click fired saveEntry twice: the first call saved the campaign
+  // and reset the form (Page Name cleared), and the second call then
+  // saw the empty form, showed the red error toast and returned.
+  // Same story for a form submit: onsubmit + this listener both
+  // fired. Both redundant handlers are removed; the single remaining
+  // handler per action is the one that saves. A duplicate call can
+  // no longer produce a false error toast, and rapid double-clicks
+  // can no longer re-enter saveEntry on the reset form.
+  // (No saveEntry call here on purpose — see renderEntryForm.)
   document.getElementById('btnApplyFilters')?.addEventListener('click', () => {
     state.filters.month = document.getElementById('filterMonth').value;
     state.filters.year = document.getElementById('filterYear').value;
