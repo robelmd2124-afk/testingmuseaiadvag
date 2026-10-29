@@ -2243,13 +2243,15 @@
       sessionStorage.setItem('adverse_pwa_banner_dismissed', '1');
     }
 
-    // Unregister any active service workers to prevent iframe / deploy asset caching conflicts
+    // Register the real service worker (2026-10-30, PWA install): Chrome
+    // only offers "Install app" when a worker with a fetch handler
+    // controls the page. The old code unregistered every worker here,
+    // which is exactly why install never fired. The worker itself is
+    // network-first for app code, so it cannot serve a stale deploy.
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (var i = 0; i < registrations.length; i++) {
-          registrations[i].unregister();
-        }
-      }).catch(function() {});
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js').catch(function() {});
+      });
     }
 
     async function convertAllDatesToStandardFormat() {

@@ -60,6 +60,34 @@ app.get('/sw.js', (req, res) => {
   res.status(404).end();
 });
 
+// PWA icon routes (2026-10-30): the icon PNGs are stored as base64 TEXT
+// files (public/*.b64) because the GitHub snapshot push accepts UTF-8
+// files only — binary PNGs cannot be pushed through it. These routes
+// decode them and serve real PNGs, so the manifest icons and the
+// apple-touch-icon URLs work exactly as if the PNGs were on disk.
+// If real PNG files with the same names are ever added to public/,
+// these routes still serve the identical bytes (routes run before
+// the static middleware below).
+const PWA_ICON_ROUTES: Record<string, string> = {
+  '/android-chrome-192x192.png': 'icon-192.b64',
+  '/android-chrome-512x512.png': 'icon-512.b64',
+  '/android-chrome-maskable-512x512.png': 'icon-maskable-512.b64',
+  '/apple-touch-icon.png': 'apple-touch-icon.b64',
+  '/favicon-32x32.png': 'favicon-32.b64',
+  '/favicon-16x16.png': 'favicon-16.b64',
+  '/favicon.ico': 'favicon-ico.b64',
+};
+for (const [route, b64File] of Object.entries(PWA_ICON_ROUTES)) {
+  app.get(route, (req, res) => {
+    const b64Path = path.join(process.cwd(), 'public', b64File);
+    if (!fs.existsSync(b64Path)) return res.status(404).end();
+    const buf = Buffer.from(fs.readFileSync(b64Path, 'utf8').replace(/\s/g, ''), 'base64');
+    res.setHeader('Content-Type', route.endsWith('.ico') ? 'image/x-icon' : 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buf);
+  });
+}
+
 // Static asset caching for /src/* (performance: repeat loads were re-downloading
 // multi-MB scripts on every visit because everything was forced no-store):
 // - URLs carrying a ?v= version parameter are content-versioned by the app itself
