@@ -7785,12 +7785,6 @@ function renderEntryForm() {
           <div class="form-field ff-day">
             <label>DAY <span class="req">*</span></label>
             <input type="number" name="day" id="dayInput" min="1" value="2" required style="text-align:center">
-            <div class="quick-preset-chips" role="group" aria-label="Quick Day Presets">
-              <button type="button" class="preset-chip day-preset-chip active" data-day="2" onclick="setQuickDay(2)">2</button>
-              <button type="button" class="preset-chip day-preset-chip" data-day="3" onclick="setQuickDay(3)">3</button>
-              <button type="button" class="preset-chip day-preset-chip" data-day="5" onclick="setQuickDay(5)">5</button>
-              <button type="button" class="preset-chip day-preset-chip" data-day="7" onclick="setQuickDay(7)">7</button>
-            </div>
           </div>
 
           <div class="form-field ff-budget">
@@ -7799,12 +7793,7 @@ function renderEntryForm() {
               <span class="input-prefix">$</span>
               <input type="number" name="budget" id="budgetInput" min="1" step="any" value="10" required>
             </div>
-            <div class="quick-preset-chips" role="group" aria-label="Quick Budget Presets">
-              <button type="button" class="preset-chip bud-preset-chip active" data-bud="10" onclick="setQuickBudget(10)">10</button>
-              <button type="button" class="preset-chip bud-preset-chip" data-bud="15" onclick="setQuickBudget(15)">15</button>
-              <button type="button" class="preset-chip bud-preset-chip" data-bud="20" onclick="setQuickBudget(20)">20</button>
-              <button type="button" class="preset-chip bud-preset-chip" data-bud="25" onclick="setQuickBudget(25)">25</button>
-            </div>
+
           </div>
 
           <div class="form-field ff-rate">
@@ -8906,15 +8895,24 @@ function addMultipleCampaignRow() {
   const existingSls = Array.from(box.querySelectorAll('.multi-campaign-sl')).map(el => parseInt(el.value, 10)).filter(n => !isNaN(n) && n > 0);
   const rowSL = (baseVal > 0) ? String(Math.max(baseVal, ...existingSls) + 1) : String(count);
 
-  // Inherit sensible default from main campaign if available
+  // Copy-previous defaults (2026-10-29, user rule): a new extra row
+  // copies the PREVIOUS row's date, type, budget and day as its
+  // defaults, so the user only changes what differs. "Previous" is
+  // the last extra row when one exists, otherwise the main campaign.
+  // Every copied field stays editable afterwards for customization.
+  const prevRow = box.querySelector('.multi-campaign-row:last-child');
   const mainDayInput = document.querySelector('#entryForm [name="day"]');
   const mainBudInput = document.querySelector('#entryForm [name="budget"]');
   const mainStartInput = document.querySelector('#entryForm [name="start_date"]');
-  const initialDay = (mainDayInput && parseFloat(mainDayInput.value) > 0) ? mainDayInput.value : '2';
-  const initialBud = (mainBudInput && parseFloat(mainBudInput.value) > 0) ? mainBudInput.value : '10';
-  // Per-campaign start date: defaults to the main campaign's start date,
-  // but each extra campaign row can pick its own start date afterwards.
-  const initialStart = (mainStartInput && mainStartInput.value) ? mainStartInput.value : '';
+  const mainTypeInput = document.querySelector('#entryForm [name="types"]');
+  const srcDay = prevRow ? prevRow.querySelector('.multi-campaign-day')?.value : mainDayInput?.value;
+  const srcBud = prevRow ? prevRow.querySelector('.multi-campaign-budget')?.value : mainBudInput?.value;
+  const srcStart = prevRow ? prevRow.querySelector('.multi-campaign-start')?.value : mainStartInput?.value;
+  const srcType = prevRow ? prevRow.querySelector('.multi-campaign-type')?.value : mainTypeInput?.value;
+  const initialDay = (srcDay && parseFloat(srcDay) > 0) ? srcDay : '2';
+  const initialBud = (srcBud && parseFloat(srcBud) > 0) ? srcBud : '10';
+  const initialStart = srcStart || '';
+  const initialType = ['Boost', 'Ad Campaign', 'Increase', 'Others'].includes(srcType) ? srcType : 'Boost';
 
   const row = document.createElement('div');
   row.className = 'multi-campaign-row';
@@ -8926,31 +8924,10 @@ function addMultipleCampaignRow() {
           <span style="background:rgba(255,255,255,0.24);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:11px">SL:</span>
           <input type="number" class="multi-campaign-sl" value="${rowSL}" readonly style="width:58px;height:20px;padding:0 4px;font-family:monospace;font-size:11px;font-weight:800;background:rgba(255,255,255,0.9);color:#1e1b4b;border:none;border-radius:4px;text-align:center" title="Auto serial SL — always new, cannot be typed over">
         </span>
-        <span class="multi-row-summary" style="font-size:12px;font-weight:700;color:var(--txt-muted)">Calculating...</span>
       </div>
       <button type="button" class="btn btn-secondary btn-sm" style="height:28px;padding:0 8px;color:var(--dan);border-color:rgba(239,68,68,0.3)" onclick="this.closest('.multi-campaign-row').remove(); if(window.updateCampaignCalc) window.updateCampaignCalc();" title="Remove sub-campaign">
         <span class="ms" style="font-size:14px">delete</span> Remove
       </button>
-    </div>
-
-    <!-- Day & Budget Suggestions Banner -->
-    <div class="multi-row-suggestion" style="margin-bottom:10px;background:var(--card-subtle);border:1px dashed var(--pri);padding:7px 12px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <div style="display:flex;align-items:center;gap:6px">
-        <span class="ms" style="font-size:16px;color:var(--pri)">lightbulb</span>
-        <span class="sub-suggestion-label" style="font-size:11.5px;font-weight:700;color:var(--txt)">Day Budget Suggestion:</span>
-        <span class="sub-suggestion-calc" style="font-size:11.5px;font-weight:800;color:var(--pri)">$${initialBud} / ${initialDay}d = $${(parseFloat(initialBud)/parseFloat(initialDay)).toFixed(1)}/day</span>
-      </div>
-      <div class="sub-quick-presets" style="display:flex;gap:4px;flex-wrap:wrap">
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="1" data-bud="5" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">1d/$5</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="2" data-bud="10" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">2d/$10</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="3" data-bud="15" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">3d/$15</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="4" data-bud="20" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">4d/$20</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="5" data-bud="25" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">5d/$25</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="7" data-bud="35" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">7d/$35</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="10" data-bud="50" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">10d/$50</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="15" data-bud="75" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">15d/$75</button>
-        <button type="button" class="btn btn-secondary btn-sm sub-preset-btn" data-day="30" data-bud="150" style="height:22px;font-size:10.5px;padding:0 6px;font-weight:600">30d/$150</button>
-      </div>
     </div>
 
     <div class="multi-fields-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;width:100%;align-items:start">
@@ -8962,27 +8939,16 @@ function addMultipleCampaignRow() {
       <div class="form-field">
         <label>TYPES</label>
         <select class="multi-campaign-type">
-          <option value="Boost">Boost</option>
-          <option value="Ad Campaign">Ad Campaign</option>
-          <option value="Increase">Increase</option>
-          <option value="Others">Others</option>
+          <option value="Boost" ${initialType === 'Boost' ? 'selected' : ''}>Boost</option>
+          <option value="Ad Campaign" ${initialType === 'Ad Campaign' ? 'selected' : ''}>Ad Campaign</option>
+          <option value="Increase" ${initialType === 'Increase' ? 'selected' : ''}>Increase</option>
+          <option value="Others" ${initialType === 'Others' ? 'selected' : ''}>Others</option>
         </select>
       </div>
 
       <div class="form-field">
         <label>DAY <span class="req">*</span></label>
         <input type="number" class="multi-campaign-day" min="1" value="${initialDay}" required style="text-align:center">
-        <div class="quick-preset-chips sub-day-chips" role="group" aria-label="Day Presets" style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='1'?'active':''}" data-val="1">1</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='2'?'active':''}" data-val="2">2</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='3'?'active':''}" data-val="3">3</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='4'?'active':''}" data-val="4">4</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='5'?'active':''}" data-val="5">5</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='7'?'active':''}" data-val="7">7</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='10'?'active':''}" data-val="10">10</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='15'?'active':''}" data-val="15">15</button>
-          <button type="button" class="preset-chip day-preset-chip ${initialDay==='30'?'active':''}" data-val="30">30</button>
-        </div>
       </div>
 
       <div class="form-field">
@@ -8991,17 +8957,7 @@ function addMultipleCampaignRow() {
           <span class="input-prefix">$</span>
           <input type="number" class="multi-campaign-budget" min="1" step="any" value="${initialBud}" required>
         </div>
-        <div class="quick-preset-chips sub-bud-chips" role="group" aria-label="Budget Presets" style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='5'?'active':''}" data-val="5">5</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='10'?'active':''}" data-val="10">10</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='15'?'active':''}" data-val="15">15</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='20'?'active':''}" data-val="20">20</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='25'?'active':''}" data-val="25">25</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='30'?'active':''}" data-val="30">30</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='40'?'active':''}" data-val="40">40</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='50'?'active':''}" data-val="50">50</button>
-          <button type="button" class="preset-chip bud-preset-chip ${initialBud==='100'?'active':''}" data-val="100">100</button>
-        </div>
+
       </div>
 
       <div class="form-field">
@@ -9025,9 +8981,9 @@ function addMultipleCampaignRow() {
   const dailyEl = row.querySelector('.multi-campaign-daily');
   const takaEl = row.querySelector('.multi-campaign-taka');
   const typeEl = row.querySelector('.multi-campaign-type');
-  const sumEl = row.querySelector('.multi-row-summary');
-  const calcSpan = row.querySelector('.sub-suggestion-calc');
 
+  // Row calc: Daily and Taka only — the header summary text and the
+  // suggestion banner were removed (2026-10-29), so nothing else to update.
   const calcRow = () => {
     const d = parseFloat(dayEl?.value) || 0;
     const b = parseFloat(budEl?.value) || 0;
@@ -9038,59 +8994,11 @@ function addMultipleCampaignRow() {
       if (dailyEl) dailyEl.value = dailyValStr;
       const totalTaka = b * r;
       if (takaEl) takaEl.value = totalTaka.toFixed(2);
-      if (sumEl) {
-        sumEl.textContent = `$${b} • ${d}d ($${dailyValStr}/d) = ৳${fmtNum(totalTaka)}`;
-      }
-      if (calcSpan) {
-        calcSpan.textContent = `$${b} / ${d}d = $${dailyValStr}/day • ৳${fmtNum(totalTaka)}`;
-      }
     } else {
       if (dailyEl) dailyEl.value = '';
       if (takaEl) takaEl.value = '';
-      if (sumEl) sumEl.textContent = 'Enter day & budget';
-      if (calcSpan) calcSpan.textContent = 'Select day & budget';
     }
   };
-
-  // Day preset buttons
-  row.querySelectorAll('.sub-day-chips button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      row.querySelectorAll('.sub-day-chips button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      if (dayEl) {
-        dayEl.value = btn.dataset.val;
-        calcRow();
-        if (window.updateCampaignCalc) window.updateCampaignCalc();
-      }
-    });
-  });
-
-  // Budget preset buttons
-  row.querySelectorAll('.sub-bud-chips button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      row.querySelectorAll('.sub-bud-chips button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      if (budEl) {
-        budEl.value = btn.dataset.val;
-        calcRow();
-        if (window.updateCampaignCalc) window.updateCampaignCalc();
-      }
-    });
-  });
-
-  // Suggestion quick preset pills (1d/$5, 2d/$10, 3d/$15, etc.)
-  row.querySelectorAll('.sub-preset-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const sDay = btn.dataset.day;
-      const sBud = btn.dataset.bud;
-      if (dayEl) dayEl.value = sDay;
-      if (budEl) budEl.value = sBud;
-      row.querySelectorAll('.sub-day-chips button').forEach(b => b.classList.toggle('active', b.dataset.val === sDay));
-      row.querySelectorAll('.sub-bud-chips button').forEach(b => b.classList.toggle('active', b.dataset.val === sBud));
-      calcRow();
-      if (window.updateCampaignCalc) window.updateCampaignCalc();
-    });
-  });
 
   // Enter key inside any sub-campaign input saves campaign
   row.querySelectorAll('input, select').forEach(inp => {
@@ -9103,19 +9011,11 @@ function addMultipleCampaignRow() {
   });
 
   dayEl?.addEventListener('input', () => {
-    const val = dayEl.value;
-    row.querySelectorAll('.sub-day-chips button').forEach(b => {
-      b.classList.toggle('active', b.dataset.val === val);
-    });
     calcRow();
     if (window.updateCampaignCalc) window.updateCampaignCalc();
   });
 
   budEl?.addEventListener('input', () => {
-    const val = budEl.value;
-    row.querySelectorAll('.sub-bud-chips button').forEach(b => {
-      b.classList.toggle('active', b.dataset.val === val);
-    });
     calcRow();
     if (window.updateCampaignCalc) window.updateCampaignCalc();
   });
