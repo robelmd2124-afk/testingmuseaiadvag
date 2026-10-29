@@ -25,7 +25,7 @@ if (typeof window !== 'undefined') {
 export const CH = (typeof window !== 'undefined' && window.CH) ? window.CH : ['SL','OFF $','AD Account','ID Name','Status','Page Name','Start','End','Types','Day','Budget','Daily $','Taka','Rate','Entry Date','Month','Year','Record ID'];
 export const TODAY_HEADERS = (typeof window !== 'undefined' && window.TODAY_HEADERS) ? window.TODAY_HEADERS : ['SL','OFF $','AD Account','ID Name','Status','Page Name','Start','End','Types','Day','Budget','Daily $','Taka','Rate','Entry Date','Month','Year','Record ID'];
 export const PAYMENT_HEADERS = (typeof window !== 'undefined' && window.PAYMENT_HEADERS) ? window.PAYMENT_HEADERS : ['Date','Payment Method','Paid (৳)','Month','Year','Note'];
-export const PAGE_SUMMARY_HEADERS = (typeof window !== 'undefined' && window.PAGE_SUMMARY_HEADERS) ? window.PAGE_SUMMARY_HEADERS : ['Page Name','Total Ads','Total Budget $'];
+export const PAGE_SUMMARY_HEADERS = (typeof window !== 'undefined' && window.PAGE_SUMMARY_HEADERS) ? window.PAGE_SUMMARY_HEADERS : ['Page Name','Status','AD Account','ID Name','Total Ads','Total Budget $','Total Taka','Last End'];
 export const AGENCY_SPENDING_HEADERS = (typeof window !== 'undefined' && window.AGENCY_SPENDING_HEADERS) ? window.AGENCY_SPENDING_HEADERS : ['Month','Year','Total Spend $'];
 export const MONTHLY_CLOSING_HEADERS = (typeof window !== 'undefined' && window.MONTHLY_CLOSING_HEADERS) ? window.MONTHLY_CLOSING_HEADERS : ['Month','Year','Status','Closed At','Closed By','Total Campaign','Total Budget $','Total Campaign Taka','Total Paid (৳)','Total Due (৳)','Agency Cost (৳)','Rate'];
 export const AGENCY_COST_HEADERS = (typeof window !== 'undefined' && window.AGENCY_COST_HEADERS) ? window.AGENCY_COST_HEADERS : ['Date','Month','Year','Type','Cost','Per Person Cost','Status','Record ID'];
@@ -3509,26 +3509,46 @@ function selectMenu(key) {
       masterList.forEach(c => {
         const p = c['Page Name'] || c.page_name || '';
         if (!p) return;
-        if (!pMap[p]) pMap[p] = { 'Page Name': p, 'Total Ads': 0, 'Total Budget $': 0 };
+        if (!pMap[p]) pMap[p] = { 'Page Name': p, 'Total Ads': 0, 'Total Budget $': 0, 'Total Taka': 0 };
         pMap[p]['Total Ads'] += 1;
         pMap[p]['Total Budget $'] += parseFloat(c['Budget'] || c.budget || 0) || 0;
+        pMap[p]['Total Taka'] += parseFloat(String(c['Taka'] || c.taka || 0).replace(/[^0-9.]/g, '')) || 0;
         // Latest-status classification (same rule as the server): each page
         // counts once, under its latest campaign's status, so New + Old
-        // always equals Active — never the old double-count.
+        // always equals Active — never the old double-count. The latest
+        // campaign also supplies the row's full data (AD Account, ID
+        // Name, Last End), so the summary shows everything per page.
         const dObj = (typeof parseAnyDate === 'function' ? parseAnyDate(c['Start'] || c['Start Date'] || c['Date'] || '') : null);
         const t = dObj ? dObj.getTime() : 0;
         const sl = parseInt(String(c.SL || c['SL NO'] || 0).replace(/\D/g, ''), 10) || 0;
         const cur = latestByPage[p];
-        if (!cur || t > cur.t || (t === cur.t && sl >= cur.sl)) latestByPage[p] = { t, sl, status: String(c['Status'] || c.status || '').toLowerCase() };
+        if (!cur || t > cur.t || (t === cur.t && sl >= cur.sl)) latestByPage[p] = {
+          t, sl,
+          status: String(c['Status'] || c.status || '').toLowerCase(),
+          ad: String(c['AD Account'] || c.ad_account || '').trim(),
+          id: String(c['ID Name'] || c.id_name || '').trim(),
+          end: String(c['End'] || c['End Date'] || c.end_date || '').trim()
+        };
       });
-      const pageList = Object.values(pMap).sort((a, b) => b['Total Budget $'] - a['Total Budget $']);
+      const pageList = Object.values(pMap).sort((a, b) => b['Total Budget $'] - a['Total Budget $']).map(row => {
+        const latest = latestByPage[row['Page Name']];
+        const isNew = latest && latest.status === 'new page';
+        return {
+          ...row,
+          'Status': isNew ? 'New Page' : 'Old Page',
+          'AD Account': latest ? latest.ad : '',
+          'ID Name': latest ? latest.id : '',
+          'Last End': latest ? latest.end : ''
+        };
+      });
       let newPages = 0, newBudget = 0, oldPages = 0, oldBudget = 0;
       Object.keys(pMap).forEach(p => {
         if (latestByPage[p] && latestByPage[p].status === 'new page') { newPages++; newBudget += pMap[p]['Total Budget $']; }
         else { oldPages++; oldBudget += pMap[p]['Total Budget $']; }
       });
+      state.pageSummaryAll = pageList;
       state.rawRecords = pageList;
-      state.filteredRecords = [...pageList];
+      state.filteredRecords = applyPageSummaryFilterTo(pageList);
       renderRecordsTable({ headers: PAGE_SUMMARY_HEADERS, rows: state.filteredRecords });
       renderStats({
         totalRecords: pageList.length,
@@ -3537,6 +3557,7 @@ function selectMenu(key) {
         totalAds: masterList.filter(c => (c['Page Name'] || c.page_name || '')).length,
         newPages, newBudget, oldPages, oldBudget
       });
+      renderPageSummaryFilterBar();
     } else {
       state.rawRecords = [...masterList];
       state.filteredRecords = [...state.rawRecords];
@@ -3663,11 +3684,11 @@ function renderStats(d) {
     ];
   } else if (key === 'page_summery') {
     cards = [
-      { id: 'stat_ps_active', icon: 'analytics', label: 'Active Pages', rawNum: d.totalRecords, prefix: '', sub: 'Pages Running', theme: 'stat-purple' },
+      { id: 'stat_ps_active', icon: 'analytics', label: 'Active Pages', rawNum: d.totalRecords, prefix: '', sub: 'Pages Running', theme: 'stat-purple', onclick: "setPageSummaryFilter('all')" },
       { id: 'stat_ps_ads', icon: 'ads_click', label: 'Total Ads', rawNum: d.totalAds, prefix: '', sub: 'Total Runs', theme: 'stat-blue' },
       { id: 'stat_ps_budget', icon: 'paid', label: 'Total Budget ($)', rawNum: d.totalBudget, prefix: '$', sub: 'Cumulative', theme: 'stat-green' },
-      { id: 'stat_ps_new', icon: 'fiber_new', label: 'New Pages', rawNum: d.newPages, prefix: '', sub: '$' + fmtNum(d.newBudget), theme: 'stat-amber' },
-      { id: 'stat_ps_old', icon: 'history', label: 'Old Pages', rawNum: d.oldPages, prefix: '', sub: '$' + fmtNum(d.oldBudget), theme: 'stat-purple' }
+      { id: 'stat_ps_new', icon: 'fiber_new', label: 'New Pages', rawNum: d.newPages, prefix: '', sub: '$' + fmtNum(d.newBudget), theme: 'stat-amber', onclick: "setPageSummaryFilter('new')" },
+      { id: 'stat_ps_old', icon: 'history', label: 'Old Pages', rawNum: d.oldPages, prefix: '', sub: '$' + fmtNum(d.oldBudget), theme: 'stat-purple', onclick: "setPageSummaryFilter('old')" }
     ];
   } else if (key === 'agency_spending') {
     cards = [
@@ -3702,7 +3723,7 @@ function renderStats(d) {
   const row = document.getElementById('statsRow');
   if (!row) return;
   row.innerHTML = cards.map((c, i) => `
-    <div class="stat-card ${c.theme || ''}">
+    <div class="stat-card ${c.theme || ''}" ${c.onclick ? `onclick="${c.onclick}" style="cursor:pointer" title="Click kore filter koro"` : ''}>
       <div class="stat-header">
         <div class="stat-label">${escapeHtml(c.label)}</div>
         <div class="stat-icon"><span class="ms">${c.icon}</span></div>
@@ -4169,14 +4190,24 @@ function filterTableRows(query) {
       if (isCampaign && isAllMonths && Array.isArray(state.masterCampaignRegistry) && state.masterCampaignRegistry.length > pool.length) {
         pool = state.masterCampaignRegistry;
       }
-      
+
       state.filteredRecords = pool.filter(row => matchesCampaignRow(row, q));
+    }
+
+    // Page Summary: the New/Old filter must survive search and search-clear.
+    if (currentKey === 'page_summery') {
+      state.filteredRecords = applyPageSummaryFilterTo(state.filteredRecords);
     }
 
     renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
 
-    // Dynamically update KPI summary cards for exact search results
-    if (q) {
+    // Dynamically update KPI summary cards for exact search results.
+    // Page Summary cards use their own aggregates (totalAds, new/old
+    // counts) — the campaign-shaped rewrite below would zero them, so
+    // it is skipped in that view; its counter updates via the table.
+    if (currentKey === 'page_summery') {
+      // No stat rewrite here.
+    } else if (q) {
       const sumBud = state.filteredRecords.reduce((s, r) => s + (parseFloat(String(r['Budget'] || r.budget || '0').replace(/[^0-9.]/g, '')) || 0), 0);
       const sumTak = state.filteredRecords.reduce((s, r) => s + (parseFloat(String(r['Taka'] || r.taka || '0').replace(/[^0-9.]/g, '')) || 0), 0);
       renderStats({
@@ -4208,6 +4239,47 @@ function clearTableSearch() {
   filterTableRows('');
 }
 
+// Page Summary filters (2026-10-29): New / Old by the page's latest
+// campaign status. The filter lives on state so it survives search,
+// search-clear and table re-renders; the bar below the toolbar shows
+// the active filter with counts.
+function applyPageSummaryFilterTo(list) {
+  const f = state.pageSummaryFilter || 'all';
+  if (f === 'new') return (list || []).filter(r => String(r['Status'] || '').toLowerCase().includes('new'));
+  if (f === 'old') return (list || []).filter(r => String(r['Status'] || '').toLowerCase().includes('old'));
+  return list || [];
+}
+function setPageSummaryFilter(f) {
+  state.pageSummaryFilter = f;
+  const base = state.pageSummaryAll || state.rawRecords || [];
+  const q = (state.searchQuery || '').trim();
+  const searched = q ? base.filter(row => matchesCampaignRow(row, q)) : [...base];
+  state.filteredRecords = applyPageSummaryFilterTo(searched);
+  renderRecordsTable({ headers: state.headers, rows: state.filteredRecords });
+  renderPageSummaryFilterBar();
+}
+window.setPageSummaryFilter = setPageSummaryFilter;
+function renderPageSummaryFilterBar() {
+  const old = document.getElementById('pageSummaryFilterBar');
+  if (old) old.remove();
+  const card = document.getElementById('recordsCard');
+  const wrap = card ? card.querySelector('.table-wrap') : null;
+  if (!card || !wrap) return;
+  const all = state.pageSummaryAll || state.rawRecords || [];
+  const newCount = all.filter(r => String(r['Status'] || '').toLowerCase().includes('new')).length;
+  const oldCount = all.filter(r => String(r['Status'] || '').toLowerCase().includes('old')).length;
+  const f = state.pageSummaryFilter || 'all';
+  const btn = (key, label, count) => {
+    const active = f === key;
+    return `<button type="button" class="btn ${active ? 'btn-primary' : 'btn-secondary'}" onclick="setPageSummaryFilter('${key}')" style="height:32px;font-size:12.5px;padding:0 14px;font-weight:700">${label} (${count})</button>`;
+  };
+  const bar = document.createElement('div');
+  bar.id = 'pageSummaryFilterBar';
+  bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-bottom:1px solid var(--bor);';
+  bar.innerHTML = `<span style="font-weight:800;font-size:13px;">Filter:</span>${btn('all', 'All Pages', all.length)}${btn('new', 'New Pages', newCount)}${btn('old', 'Old Pages', oldCount)}<span style="font-size:11.5px;color:var(--txt-muted);margin-left:4px;">Status = page-er latest campaign onujayi</span>`;
+  card.insertBefore(bar, wrap);
+}
+
 function renderRecordsTable(data) {
   const thead = document.getElementById('tableHead');
   const tbody = document.getElementById('tableBody');
@@ -4217,6 +4289,11 @@ function renderRecordsTable(data) {
   const currentKey = state.currentMenu ? state.currentMenu.key : '';
   const records = rawList.filter(r => isValidClientRow(r, currentKey));
   const isTodayCreated = state.currentMenu && (state.currentMenu.key === 'today_created_campaign' || state.currentMenu.key === 'today_created');
+  // The Page Summary filter bar belongs to that view only.
+  if (currentKey !== 'page_summery') {
+    const psBar = document.getElementById('pageSummaryFilterBar');
+    if (psBar) psBar.remove();
+  }
 
   let headers = data.headers || [];
 
@@ -4372,7 +4449,7 @@ function renderRecordsTable(data) {
   } else if (isAgencyCost) {
     displayColumns = ['Date', 'Month', 'Year', 'Type', 'Cost', 'Per Person Cost', 'Status'];
   } else if (isPageSummary) {
-    displayColumns = ['Rank', 'Page Name', 'Total Ads', 'Total Budget ($)'];
+    displayColumns = ['Rank', 'Page Name', 'Status', 'AD Account', 'ID Name', 'Total Ads', 'Total Budget ($)', 'Total Taka', 'Last End'];
   } else {
     displayColumns = headers.filter(h => String(h).trim().toLowerCase() !== 'action');
   }
@@ -4384,7 +4461,7 @@ function renderRecordsTable(data) {
 
   if (counter) {
     if (isPageSummary) {
-      const pageTotalUSD = displayRecords.reduce((sum, r) => sum + (parseFloat(r['Total Budget ($)'] || r['budget'] || r['Budget'] || 0) || 0), 0);
+      const pageTotalUSD = displayRecords.reduce((sum, r) => sum + (parseFloat(r['Total Budget ($)'] || r['Total Budget $'] || r['budget'] || r['Budget'] || 0) || 0), 0);
       counter.innerHTML = `<span style="font-weight:700">${displayRecords.length} pages • $${fmtNum(pageTotalUSD)}</span>`;
     } else {
       let totalUSD = 0;
