@@ -1209,6 +1209,44 @@ function showToast(msg, type = 'success') {
   t._toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
 }
 
+// Premium saving overlay (2026-10-29): replaces the plain bottom-right
+// "Saving…" toast during campaign save. A centered glass card with a
+// gold ring spinner and a shimmer bar — it stays up until the server
+// confirms (success / warning / error), so the user never mistakes a
+// pending save for a confirmed one. Hidden on every exit path of the
+// campaign save flow, including the outer catch below.
+function showSavingOverlay(pageName, extraCount) {
+  hideSavingOverlay();
+  if (!document.getElementById('premiumSavingStyle')) {
+    const st = document.createElement('style');
+    st.id = 'premiumSavingStyle';
+    st.textContent = '@keyframes premiumSavingSpin{to{transform:rotate(360deg)}}@keyframes premiumSavingShimmer{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}';
+    document.head.appendChild(st);
+  }
+  const title = pageName ? String(pageName) : 'Campaign';
+  const sub = extraCount > 0 ? `+ ${extraCount} aro campaign` : 'Google Sheet-e sync hocche…';
+  const el = document.createElement('div');
+  el.id = 'premiumSavingOverlay';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(10,12,35,0.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);';
+  el.innerHTML = `<div style="background:linear-gradient(135deg,#7c3aed,#2563eb 55%,#f59e0b);padding:1.5px;border-radius:22px;box-shadow:0 24px 60px rgba(0,0,0,0.45);">` +
+    `<div style="background:linear-gradient(160deg,#1b2149,#12163a);border-radius:20.5px;padding:28px 34px;min-width:300px;max-width:92vw;text-align:center;color:#fff;">` +
+    `<div style="font-size:10px;letter-spacing:3px;font-weight:800;color:#fbbf24;">ADVERSE &nbsp;•&nbsp; SYNCING</div>` +
+    `<div style="width:56px;height:56px;margin:18px auto 14px;border-radius:50%;border:3px solid rgba(255,255,255,0.15);border-top-color:#f59e0b;border-right-color:#a78bfa;animation:premiumSavingSpin 0.9s linear infinite;"></div>` +
+    `<div style="font-size:19px;font-weight:800;">Saving Campaign</div>` +
+    `<div style="font-size:14px;font-weight:600;color:#c7d2fe;margin-top:4px;">${title}</div>` +
+    `<div style="font-size:12.5px;color:#94a3b8;margin-top:2px;">${sub}</div>` +
+    `<div style="height:4px;margin:18px 0 12px;border-radius:99px;background:rgba(255,255,255,0.10);overflow:hidden;"><div style="width:40%;height:100%;border-radius:99px;background:linear-gradient(90deg,#7c3aed,#f59e0b);animation:premiumSavingShimmer 1.2s ease-in-out infinite;"></div></div>` +
+    `<div style="font-size:11.5px;color:#94a3b8;">🔒 Confirm howar age reload korben na</div>` +
+    `</div></div>`;
+  document.body.appendChild(el);
+}
+function hideSavingOverlay() {
+  const el = document.getElementById('premiumSavingOverlay');
+  if (el) el.remove();
+}
+window.showSavingOverlay = showSavingOverlay;
+window.hideSavingOverlay = hideSavingOverlay;
+
 function showSyncIssueBanner(_msg = '') {
   // Silent Mode: Do not display visual banner or toast on screen as requested by user
   const banner = document.getElementById('syncIssueBanner');
@@ -8735,7 +8773,8 @@ async function saveEntry() {
         }, 800);
       }
 
-      showToast('⏳ Saving… Google Sheet-e sync hocche, confirm howar age reload korben na 📋', 'info');
+      // Premium overlay instead of the old bottom-right "Saving…" toast.
+      showSavingOverlay(data['Page Name'] || data.page_name || '', batchItems.length);
 
       // 5. Asynchronous background server & Google Sheet persistence with Vault Backup
       // NOTE: the server RPC below is the ONLY sheet writer for campaigns.
@@ -8764,6 +8803,7 @@ async function saveEntry() {
           const isOfflineFallback = Boolean(res && res.offline);
           const sheetWriteFailed = Boolean(res && res.sheetSynced === false);
           if (res && res.success && !isOfflineFallback && !sheetWriteFailed) {
+            hideSavingOverlay();
             showToast('✅ Campaign saved & synced!', 'success');
             const confirmedRecords = Array.isArray(res.records) ? res.records : (res.record ? [res.record] : (res.items ? res.items.map(it => it.record) : []));
             if (confirmedRecords.length > 0) {
@@ -8812,6 +8852,7 @@ async function saveEntry() {
             else saveEntryToVault(optimisticItems, 'saved');
           } else {
             console.warn('Server addCampaign unconfirmed:', res);
+            hideSavingOverlay();
             enqueueOfflineSync({
               type: 'campaign',
               data,
@@ -8836,6 +8877,7 @@ async function saveEntry() {
             optimisticItems,
             timestamp: Date.now()
           });
+          hideSavingOverlay();
           showToast('⚠️ Server error! Locally saved, auto-sync hobe — sheet-e na dekha porjonto confirm na, reload korle harate pare.', 'warning');
         }
       })();
@@ -8878,6 +8920,7 @@ async function saveEntry() {
 
   } catch (err) {
     console.error('Save Entry Error:', err);
+    hideSavingOverlay();
     showToast('Save Error: ' + (err.message || 'Unknown error'), 'error');
   }
 }
