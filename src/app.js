@@ -6760,15 +6760,12 @@ async function copyMultipleRecordsSequentially(items) {
     }
   }
 
-  // Final write: ALL campaign names, one per line, as the current clipboard
-  // item — so a plain Ctrl+V pastes every name separately (one per line),
-  // while the individual entries above stay available in Win+V history.
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(list.join('\n'));
-    }
-  } catch (_) { /* individual history entries are already written */ }
-
+  // No final combined write (removed 2026-10-30): it used to overwrite the
+  // clipboard with ALL campaigns joined by newlines, so a plain Ctrl+V
+  // pasted every campaign together instead of one separate campaign.
+  // Now the current clipboard item stays the FIRST campaign (written last
+  // in reverse order), and every campaign remains a separate Win+V entry.
+  // Users who want all lines together can use the Combined copy button.
   showToast(`📋 ${list.length} campaigns copied to clipboard individually (Win + V history ready)!`, 'success');
 }
 
@@ -8344,6 +8341,17 @@ function resetEntryForm() {
     if (noticeEl) { noticeEl.style.display = 'none'; noticeEl.innerHTML = ''; }
     const profileBox = document.getElementById('pageProfileSummary');
     if (profileBox) profileBox.classList.add('hidden');
+
+    // All-time today default: after every save/Reset the START returns to
+    // today's date (and END clears) instead of keeping the last changed date.
+    const startInput = form.querySelector('[name="start_date"]');
+    if (startInput) {
+      startInput.value = getTodayLocalDateStr();
+      startInput.dispatchEvent(new Event('input', { bubbles: true }));
+      startInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const endInput = form.querySelector('[name="end_date"]');
+    if (endInput) endInput.value = '';
 
     const startDateVal = form.querySelector('[name="start_date"]')?.value;
     const dObj = startDateVal ? parseAnyDate(startDateVal) : null;
