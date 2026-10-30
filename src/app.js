@@ -4669,8 +4669,8 @@ function renderRecordsTable(data) {
           return `<td class="${cClass}" style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:var(--pri)">৳${highlightMatch(fmtNum(perVal), sq)}</td>`;
         }
         if (h === 'OFF $' || String(h).toLowerCase() === 'off $' || String(h).toLowerCase() === 'off' || String(h).toLowerCase() === 'off usd') {
-          let offVal = r['OFF $'] ?? r['OFF USD'] ?? r['off_usd'] ?? r['OFF'] ?? r['Off'] ?? r['off'] ?? val ?? '0';
-          if (offVal === '' || offVal === undefined || offVal === null) offVal = '0';
+          let offVal = r['OFF $'] ?? r['OFF USD'] ?? r['off_usd'] ?? r['OFF'] ?? r['Off'] ?? r['off'] ?? val ?? '';
+          if (offVal === undefined || offVal === null) offVal = '';
           return `<td class="${cClass}" style="text-align:center;font-weight:700;color:var(--dan);font-variant-numeric:tabular-nums">${highlightMatch(offVal, sq)}</td>`;
         }
         if (h === 'Taka' || String(h).toLowerCase() === 'taka' || h === 'Total Taka') {
@@ -7292,7 +7292,7 @@ function cloneCampaignRecord(r) {
   const day = r['Day'] || r['day'] || '1';
   const budget = r['Budget'] || r['budget'] || '10';
   const rate = r['Rate'] || r['rate'] || state.rate || '140';
-  const offUsd = r['OFF USD'] || r['off_usd'] || '0';
+  const offUsd = r['OFF USD'] || r['off_usd'] || '';
   const todayStr = getTodayLocalDateStr();
 
   const pageInput = form.querySelector('#pageNameInput') || form.querySelector('[name="page_name"]');
@@ -7322,7 +7322,7 @@ function cloneCampaignRecord(r) {
   if (dayInput) dayInput.value = day;
   if (budgetInput) budgetInput.value = budget;
   if (rateInput && rate) rateInput.value = rate;
-  if (offInput && offUsd) offInput.value = offUsd;
+  if (offInput) offInput.value = offUsd || '';
 
   if (window.updateCampaignCalc) window.updateCampaignCalc();
 
@@ -7844,7 +7844,7 @@ function renderEntryForm() {
 
           <div class="form-field ff-off">
             <label>OFF $</label>
-            <input type="number" name="off_usd" id="offUsdInput" value="0" placeholder="0" style="text-align:center">
+            <input type="number" name="off_usd" id="offUsdInput" value="" placeholder="" style="text-align:center">
           </div>
 
           <div class="form-field ff-ad">
@@ -8316,7 +8316,7 @@ function resetEntryForm() {
     if (idInput) idInput.value = '';
 
     const offInput = form.querySelector('#offUsdInput') || form.querySelector('[name="off_usd"]');
-    if (offInput) offInput.value = '0';
+    if (offInput) offInput.value = '';
 
     const dayInput = form.querySelector('[name="day"]');
     if (dayInput) dayInput.value = '';
@@ -8749,8 +8749,8 @@ async function saveEntry() {
             'Budget': bVal,
             'Rate': rateVal,
             'Taka': tVal,
-            'OFF $': data.off_usd ?? data['OFF $'] ?? '0',
-            'OFF USD': data.off_usd ?? data['OFF $'] ?? '0',
+            'OFF $': data.off_usd ?? data['OFF $'] ?? '',
+            'OFF USD': data.off_usd ?? data['OFF $'] ?? '',
             'Entry Date': getTodayFormatted(),
             'Month': itemMonth,
             'Year': itemYear,
@@ -8781,8 +8781,8 @@ async function saveEntry() {
           'Budget': bVal,
           'Rate': rateVal,
           'Taka': tVal,
-          'OFF $': data.off_usd ?? data['OFF $'] ?? '0',
-          'OFF USD': data.off_usd ?? data['OFF $'] ?? '0',
+          'OFF $': data.off_usd ?? data['OFF $'] ?? '',
+          'OFF USD': data.off_usd ?? data['OFF $'] ?? '',
           'Entry Date': getTodayFormatted(),
           'Month': itemMonth,
           'Year': itemYear,
@@ -9759,7 +9759,7 @@ function openEditRecord(row) {
 
   if (isCampaignRecord) {
     const slVal = row['SL'] || row['sl_no'] || row['SL NO'] || row.sl || '';
-    const offVal = row['OFF $'] ?? row['OFF USD'] ?? row['off_usd'] ?? row['OFF'] ?? row.off ?? '0';
+    const offVal = row['OFF $'] ?? row['OFF USD'] ?? row['off_usd'] ?? row['OFF'] ?? row.off ?? '';
     const adAccVal = row['AD Account'] || row['ad_account'] || '';
     const idVal = row['ID Name'] || row['id_name'] || '';
     const statusVal = row['Status'] || row.status || 'Old Page';
