@@ -7448,6 +7448,17 @@ function handlePageNameLookup(pageName, opts = {}) {
 
   // 1. Instant Synchronous check & auto-fill from local memory store (Zero Lag)
   const knownInList = state.pages && state.pages.some(p => p.toLowerCase() === cleanName.toLowerCase());
+
+  // Full persisted registry check (2026-10-31, Old/New status rule): a page
+  // known only in the registry (older history, not in the current view) must
+  // still count as Old Page at entry time, without waiting for the async
+  // server profile — otherwise a fast Save could store it as New Page and
+  // wrongly list it under New Pages.
+  const registryKnown = (state.masterCampaignRegistry || []).some(r => {
+    if (!r) return false;
+    const p = String(r['Page Name'] || r.page_name || r.Page || '').trim().toLowerCase();
+    return p === cleanName.toLowerCase();
+  });
   
   // Collect all matching records from local memory store across all sheets
   const allKnownRecords = [
@@ -7478,7 +7489,7 @@ function handlePageNameLookup(pageName, opts = {}) {
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   if (statusSelect) {
-    statusSelect.value = (knownInList || localMatching.length > 0) ? 'Old Page' : 'New Page';
+    statusSelect.value = (knownInList || registryKnown || localMatching.length > 0) ? 'Old Page' : 'New Page';
   }
 
   // If page has past campaigns in local records, compute most frequent options immediately
